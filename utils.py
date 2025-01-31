@@ -1,8 +1,5 @@
-import base64
-import hashlib
 import re
-from typing import Union
-import uuid as uuid_lib
+from typing import Optional
 
 
 def contains_placeholders(s: str) -> bool:
@@ -26,84 +23,42 @@ def contains_placeholders(s: str) -> bool:
     """
     return bool(re.search(r'(?:%\w|\{\{|\})', s))
 
-class UUIDManager:
-    """A utility class for managing UUIDs, providing methods to
-    generate, compress, decompress, hash, and validate UUIDs.
+def format_index_with_padding(
+        raw_index: int,
+        desired_length: Optional[int] = None
+    ) -> str:
+    """Formats an integer index with leading zeros to match a specified
+    length.
 
-    Methods
+    Parameters
+    ----------
+    raw_index : int
+        The integer index to be formatted.
+    desired_length : int or None, optional
+        The desired length of the formatted string. By default None,
+        then silently the same length as `raw_index`.
+
+    Returns
     -------
-    `uuid()` -> str:
-        Generate a random UUID and return it as a string.
+    str
+        The formatted index as a string with leading zeros.
 
-    `compress_uuid(original_uuid: Union[uuid_lib.UUID, str])` -> str:
-        Compress a UUID into a shorter Base64 string representation.
-
-    `decompress_uuid(compressed: str)` -> uuid_lib.UUID:
-        Decompress a Base64 string back into a UUID object.
-
-    `hash_uuid(original_uuid: Union[uuid_lib.UUID, str], hash_length: int = 7)` -> str:
-        Generate a short hash for a UUID using SHA-256.
-
-    `is_valid(uuid: str)` -> bool:
-        Validate the format of a given UUID string.
+    Raises
+    ------
+    ValueError
+        If `raw_index` or `desired_length` are not integers, if
+        `raw_index` is negative, if `desired_length` is not positive, or
+        if the length of `raw_index` exceeds `desired_length`.
     """
-    @staticmethod
-    def uuid() -> str:
-        return str(uuid_lib.uuid4())
+    desired_length = desired_length or len(str(raw_index))
 
-    @staticmethod
-    def compress_uuid(original_uuid: Union[uuid_lib.UUID, str]) -> str:
-        # Ensure the input is a valid UUID
-        if not isinstance(original_uuid, (uuid_lib.UUID, str)):
-            raise ValueError("Input must be a UUID object or str.")
-        if isinstance(original_uuid, str):
-            original_uuid = uuid_lib.UUID(original_uuid)
+    if (not isinstance(raw_index, int) or not isinstance(desired_length, int)):
+        raise ValueError("Both `raw_index` and `desired_length` must be integers.")
+    if raw_index < 0:
+        raise ValueError("Index must be non-negative")
+    if desired_length <= 0:
+        raise ValueError("`desired_length` must be a positive integer.")
+    if len(str(raw_index)) > desired_length:
+        raise ValueError("`raw_index` length exceeds desired length.")
 
-        # Convert the UUID to bytes
-        uuid_bytes = original_uuid.bytes
-        
-        # Encode the bytes to a Base64 string and strip the trailing '=' padding
-        compressed = base64.urlsafe_b64encode(uuid_bytes).rstrip(b'=').decode('utf-8')
-        
-        return compressed
-
-    @staticmethod
-    def decompress_uuid(compressed: str) -> uuid_lib.UUID:
-        # Add back any necessary '=' padding for Base64 decoding
-        padding = '=' * ((4 - len(compressed) % 4) % 4)
-        compressed += padding
-        
-        # Decode the Base64 string to bytes
-        uuid_bytes = base64.urlsafe_b64decode(compressed)
-        
-        # Convert the bytes back to a UUID object
-        original_uuid = uuid_lib.UUID(bytes=uuid_bytes)
-        
-        return original_uuid
-
-    @staticmethod
-    def hash_uuid(
-            original_uuid: Union[uuid_lib.UUID, str],
-            hash_length: int = 7
-        ) -> str:
-        """Generate a short hash for a UUID object and store the mapping."""
-        # Ensure the input is a valid UUID
-        if not isinstance(original_uuid, (uuid_lib.UUID, str)):
-            raise ValueError("Input must be a UUID object or str.")
-        if isinstance(original_uuid, str):
-            original_uuid = uuid_lib.UUID(original_uuid)
-
-        # Generate a hash using SHA-256 and take the specified number of characters
-        hash_value = hashlib.sha256(original_uuid.bytes).hexdigest()[:hash_length]
-        
-        return hash_value
-
-    @staticmethod
-    def is_valid(uuid: str) -> bool:
-        """Validation of input UUID format."""
-        try:
-            uuid_lib.UUID(uuid)
-        except ValueError:
-            return False
-
-        return True
+    return f"{raw_index:0{desired_length}}"

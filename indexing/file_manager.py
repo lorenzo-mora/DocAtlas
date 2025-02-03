@@ -1,13 +1,13 @@
 from pathlib import Path
 import shutil
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Set, Tuple, Union
 
 import fitz
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 import pymupdf
 
-from config.file_management import PDF_SOURCE_FOLDER
+from config.file_management import PDF_SOURCE_FOLDER, OVERWRITE_IF_EXISTS, UNIQUE_IF_EXISTS
 from indexing.components import DocInfo, Document, Page
 from indexing.utils import UUIDManager
 from logger.setup import LoggerManager
@@ -17,6 +17,7 @@ class FileManager:
 
     docs_info: List[DocInfo]
     docs: List[Document]
+    _unavbl_uuids: Set[str]
 
     def __init__(
             self,
@@ -26,6 +27,7 @@ class FileManager:
         self._log_mgr = logger_manager
         self.source_folder_path = self._validate_data_source_folder(folder_path)
 
+        self._unavbl_uuids = set()
         self.docs_info = []
         self.docs = []
 
@@ -44,6 +46,24 @@ class FileManager:
             path.mkdir(parents=True, exist_ok=True)
 
         return path
+
+    @property
+    def unavailable_uuids(self) -> Optional[Set[str]]:
+        """Unique identifiers cannot be assigned to a new document."""
+        return self._unavbl_uuids if self._unavbl_uuids else None
+
+    @unavailable_uuids.setter
+    def unavailable_uuids(self, ids: Union[List[str], str]) -> None:
+        if not isinstance(ids, (list, str)):
+            raise TypeError(
+                ("`ids` may be either a list of strings or a string. "
+                    f"Instead, a {type(ids)} has been provided.")
+            )
+
+        if isinstance(ids, str):
+            self._unavbl_uuids.add(ids)
+        elif isinstance(ids, list):
+            self._unavbl_uuids.update(ids)
 
     def download_drive_folder_to_local(self, folder_id: str) -> None:
         """Download files from a specified Google Drive folder to a
@@ -142,18 +162,23 @@ class FileManager:
     def get_pdf_from_local(
             self,
             file_path: Union[str, Path],
-            force: bool = False
+            force: bool = OVERWRITE_IF_EXISTS,
+            unique: bool = UNIQUE_IF_EXISTS
         ) -> Optional[Path]:
         """Copies a PDF file from a specified local path to the source
-        folder.
+        project folder.
 
         Parameters
         ----------
         file_path : str or Path
             The path to the local file to be copied.
         force : bool, optional
-            If True, overwrites the file in the destination if it
-            exists. By default False.
+            If True, overwrites the existing file. If False, skips if
+            the file exists. By default False.
+        unique : bool, optional
+            If True and `force=False`, adds an incremental number to the
+            filename if a file with the same name exists. Otherwise, the
+            file is not copied into the project folder. By default False.
 
         Raises
         ------
@@ -166,42 +191,61 @@ class FileManager:
             raise ValueError(
                 "Specified path is empty or does not point to a file")
 
-        file_name = file_path.name
-        dest_path = self.source_folder_path / file_name
-
         if file_path.suffix.lower() != ".pdf":
             self._log_mgr.log_message(
-                f"`{file_name}` file is not a PDF; it is skipped.", "WARNING")
+                f"`{file_path.name}` file is not a PDF; it is skipped.", "WARNING")
             return
 
-        if not force:
-            file_name, dest_path = self.get_unique_file_path(dest_path)
+        dest_path = self.source_folder_path / file_path.name
+        # Handle file existence logic
+        if dest_path.exists():
+            if force:
+                self._log_mgr.log_message(
+                    f"Overwriting `{dest_path.name}`.", "WARNING")
+            elif unique:
+                _, dest_path = self.get_unique_file_path(dest_path)
+                self._log_mgr.log_message(
+                    f"Saving file as `{dest_path.name}` to avoid conflict.",
+                    "DEBUG"
+                )
+            else:
+                self._log_mgr.log_message(
+                    f"File `{dest_path.name}` already exists; skipping copy.",
+                    "WARNING"
+                )
+                return None
 
+        # Perform the file copy operation
         try:
             with open(file_path, 'rb') as src, open(dest_path, 'wb') as dst:
                 shutil.copyfileobj(src, dst)
         except FileNotFoundError as e:
             self._log_mgr.log_message(
-                f"File not found: `{file_path}`. Error: {e}", 
-                "ERROR"
-            )
+                f"File not found: `{file_path}`. Error: {e}", "ERROR")
+            raise
         except PermissionError as e:
             self._log_mgr.log_message(
                 f"Permission denied when accessing `{file_path}` or `{dest_path}`. Error: {e}", 
                 "ERROR"
             )
+            raise
         except Exception as e:
             self._log_mgr.log_message(
                 f"Unexpected error copying file `{file_path}` to `{dest_path}`: {e}", 
                 "ERROR"
             )
+            raise
 
         self._log_mgr.log_message(
-            f"File `{file_path}` was successfully saved in the current folder (`{dest_path}`).",
-            "DEBUG")
+            f"File `{file_path.name}` was successfully saved as `{dest_path.name}`.",
+            "DEBUG"
+        )
 
         info = DocInfo(
-            id=UUIDManager.uuid(), title=file_name, embed_link=str(file_path))
+            id=UUIDManager.uuid(self.unavailable_uuids),
+            title=dest_path.name,
+            embed_link=str(file_path)
+        )
         self.docs_info.append(info)
         return dest_path
 
@@ -232,14 +276,21 @@ class FileManager:
         pdf_files = [child for child in folder_path.iterdir() if child.is_file()]
         compatible_files = []
         for pdf_file in pdf_files:
-            dest = self.get_pdf_from_local(pdf_file)
+            dest = None
+            try:
+                dest = self.get_pdf_from_local(pdf_file)
+            except Exception as e:
+                self._log_mgr.log_message(
+                    f"The file `{pdf_file}` is skipped due to an error: {e}",
+                    "WARNING"
+                )
             if dest:
                 compatible_files.append(dest)
 
         self._log_mgr.log_message(
-            (f"Successfully retrieved the contents of folder `{folder_path}` "
-             f"({len(compatible_files)} file(s)) in the current folder."),
-            "DEBUG")
+            (f"Successfully retrieved the content of folder `{folder_path}`: "
+             f"{len(compatible_files)} new file(s) detected."),
+            "INFO")
         return compatible_files
 
     def process_pdf_file(

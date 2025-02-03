@@ -1,0 +1,13 @@
+questions_generation: |
+  The given text is the result of the text extraction from the PDF files. 
+  Generate 3 meaningful questions on the text and the respective answers.
+  Reply strictly in the JSON format:
+  {
+    "questions": ["question1", "question2", "question3"],
+    "answers": ["answer1", "answer2", "answer3"]
+  }
+
+  Ensure that the lists of questions and answers are complete and properly formatted. 
+  DO NOT include any additional information or characters outside the specified JSON format. 
+  The response must consist only of the requested JSON structure. 
+  If the generated content does not meet the specified format, please make the necessary adjustments to ensure compliance.

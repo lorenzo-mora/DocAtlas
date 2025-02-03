@@ -1,10 +1,11 @@
 import re
-from typing import List, Optional
+from typing import Optional
 
-import pandas as pd
 from sentence_transformers import SentenceTransformer
 
-from config.embedding import FIXED_EMBEDDING_LENGTH, MIN_CHUNK_LENGTH, MODEL_SENTENCE_TRANSFORMER
+from config.embedding import (
+    FIXED_EMBEDDING_LENGTH, MIN_CHUNK_LENGTH, MODEL_SENTENCE_TRANSFORMER
+)
 from indexing.components import Document
 from logger.helper import timed_block
 from logger.setup import LoggerManager
@@ -55,6 +56,11 @@ class TextProcessor:
                 f"Instead, {chunk_length} has been provided."
             )
 
+        self._log_mgr.log_message(
+            f"Text extraction from the file `{self.file.metadata.title}` has begun.",
+            "INFO"
+        )
+
         # Set a regex pattern to identify rows with 5 or more
         # consecutive dots or dashes
         pattern_to_remove = r'(\.{5,}|\-{5,})'
@@ -88,7 +94,12 @@ class TextProcessor:
 
             self._log_mgr.log_message("Page successfully processed.", "DEBUG")
 
-    def get_embedding(self, min_text_length: int = MIN_CHUNK_LENGTH):
+        self._log_mgr.log_message(
+            "Extraction from the current document successfully completed.",
+            "INFO"
+        )
+
+    def compute_embedding(self, min_text_length: int = MIN_CHUNK_LENGTH) -> None:
         """Generates embeddings for processed text chunks using the
         `SentenceTransformer` model.
 
@@ -99,16 +110,25 @@ class TextProcessor:
         """
         self.process_text_data(min_text_length)
 
+        self._log_mgr.log_message(
+            f"Embedding generation for the document `{self.file.metadata.title}`.",
+            "INFO"
+        )
+
         # Generate embeddings for the proocessed text using the
         # SentenceTransformer model
         for page in self.file.pages:
             with timed_block(f"Embedding generation for page {page.number} took", self._log_mgr.get_logger()):
 
+                step = int(len(page) * 0.22)  # Log about every 22% of completion
                 for chunk_i, chunk in enumerate(page.chunks):
-                    self._log_mgr.log_message(
-                        f"Currently generating the embedding for chunk {chunk_i}...",
-                        "DEBUG"
-                    )
+
+                    if step != 0 and (chunk_i + 1) % step == 0:
+                        progress = (chunk_i + 1) / len(page) * 100
+                        self._log_mgr.log_message(
+                            f"{progress:.0f}% of the embeddings generation completed",
+                            "DEBUG"
+                        )
 
                     if chunk.processed_content:
                         try:
@@ -120,3 +140,8 @@ class TextProcessor:
                                 "WARNING"
                             )
                             chunk.embedding = [-0.0]*self.embedding_size
+
+        self._log_mgr.log_message(
+            "Embeddings for the current document were successfully elaborated.",
+            "INFO"
+        )

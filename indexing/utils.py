@@ -3,7 +3,7 @@ import binascii
 import hashlib
 import os
 from secrets import token_bytes
-from typing import Union
+from typing import Optional, Set, Union
 import uuid as uuid_lib
 
 
@@ -13,27 +13,34 @@ class UUIDManager:
 
     Methods
     -------
-    `uuid()` -> str
-        Generate a random UUID and return it as a string.
+    `uuid(existing_uuids: Set[str] | None = None)` -> str
+        Generate a random UUID and return it as a string, ensuring it is
+        not in the existing set.
 
-    `compress_uuid(original_uuid: Union[uuid_lib.UUID, str])` -> str
+    `compress_uuid(original_uuid: uuid_lib.UUID | str)` -> str
         Compress a UUID into a shorter Base64 string representation.
 
     `decompress_uuid(compressed: str)` -> uuid_lib.UUID
         Decompress a Base64 string back into a UUID object.
 
-    `hash_uuid(original_uuid: Union[uuid_lib.UUID, str], hash_length: int = 7)` -> str
+    `hash_uuid(original_uuid: uuid_lib.UUID | str, hash_length: int = 7)` -> str
         Generate a short hash for a UUID using SHA-256.
 
     `is_valid(uuid: str)` -> bool
         Validate the format of a given UUID string.
     
-    `are_equal(uuid1: Union[uuid_lib.UUID, str], uuid2: Union[uuid_lib.UUID, str])` -> bool
+    `are_equal(uuid1: uuid_lib.UUID | str, uuid2: uuid_lib.UUID | str)` -> bool
         Check whether the two UUIDs are the same.
     """
     @staticmethod
-    def uuid() -> str:
-        return str(uuid_lib.uuid4())
+    def uuid(existing_uuids: Optional[Set[str]] = None) -> str:
+        if existing_uuids is None:
+            existing_uuids = set()
+
+        while True:
+            new_uuid = str(uuid_lib.uuid4())
+            if new_uuid not in existing_uuids:
+                return new_uuid
 
     @staticmethod
     def compress_uuid(original_uuid: Union[uuid_lib.UUID, str]) -> str:

@@ -174,3 +174,4 @@ cython_debug/
 # Custom exception
 data/
 test.ipynb
+.qodo/

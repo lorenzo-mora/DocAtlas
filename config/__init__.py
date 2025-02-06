@@ -2,7 +2,7 @@ from typing import Any, Dict
 
 
 LOGGING: Dict[str, Any] = dict(
-    name = "docatlas",
+    project_name = "docatlas",
     folder_path = "logs",
     max_size = 524288000,
     console_level = "INFO",

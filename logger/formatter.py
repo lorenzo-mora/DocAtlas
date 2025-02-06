@@ -25,7 +25,7 @@ class JsonFormatter(logging.Formatter):
         except (TypeError, ValueError) as e:
             # Handle serialization errors gracefully
             fallback_record = {
-                'timestamp': self.formatTime(record, self.datefmt),
+                'ts': self.formatTime(record, self.datefmt),
                 'level': record.levelname,
                 'message': "Log serialization error",
                 'error': str(e),
@@ -34,11 +34,11 @@ class JsonFormatter(logging.Formatter):
 
     def _create_log_record(self, record: logging.LogRecord) -> Dict[str, Any]:
         log_record = {
-            'timestamp': self.formatTime(record, self.datefmt),
-            'level': record.levelname,
-            'message': record.getMessage(),
-            'module': record.module,
-            'funcName': record.funcName,
+            'ts': self.formatTime(record, self.datefmt),
+            'lvl': record.levelname,
+            'msg': record.getMessage(),
+            'mod': record.module,
+            'fnName': record.funcName,
             'lineNo': record.lineno,
             'pathName': record.pathname
         }

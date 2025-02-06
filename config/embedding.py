@@ -1,9 +1,4 @@
-# The minimum length a text chunk must have in order not to be excluded
-# during the processing phase.
 from typing import Optional
-
-
-MIN_CHUNK_LENGTH: int = 100
 
 # The fixed truncation length of the embedding. If None, the embedding
 # size is left unchanged at the original size of the chosen model.

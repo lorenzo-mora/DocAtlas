@@ -125,13 +125,15 @@ class LoggerManager:
 
     def __init__(
         self,
-        name: str,
-        folder_path: str = "logs",
+        module_name: str,
+        project_name: Optional[str] = None,
+        folder_path: str = "./logs",
         max_size: int = 500 * 1024 * 1024,
         console_level: Union[LogLevel, str, int] = LogLevel.INFO,
         file_level: Union[LogLevel, str, int] = LogLevel.DEBUG
     ) -> None:
-        self.name = name
+        self.name = module_name
+        self.project_name = project_name or module_name
         self.log_dir = folder_path
         self.max_size = max_size
         self.console_level = self._validate_log_level(console_level)
@@ -187,7 +189,7 @@ class LoggerManager:
     def _setup_handlers(self):
         """Set up console and file handlers for the logger."""
         timestamp = time.strftime('%Y%m%d')
-        log_file = os.path.join(self.log_dir, f"{self.name}_{timestamp}.log")
+        log_file = os.path.join(self.log_dir, f"{self.project_name}_{timestamp}.log")
 
         # Console handler
         console_handler = logging.StreamHandler(sys.stdout)

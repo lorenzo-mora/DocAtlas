@@ -23,4 +23,4 @@ TEXT_BOUNDARIES_PAGE: Dict[str, Tuple[float, float]] = dict(
     y = (0.06, 0.94)
 )
 
-source_path: str = r"C:\Users\l.mora\Downloads\papers"
+source_path: str = r"C:\Users\l.mora\Downloads\papers"  # \detecting_energy_theft.pdf

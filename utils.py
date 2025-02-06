@@ -49,6 +49,17 @@ def format_index_with_padding(
         If `raw_index` or `desired_length` are not integers, if
         `raw_index` is negative, if `desired_length` is not positive, or
         if the length of `raw_index` exceeds `desired_length`.
+
+    Example
+    -------
+    >>> format_index_with_padding(42, 5)
+    '00042'
+    >>> format_index_with_padding(7)
+    '7'
+    >>> format_index_with_padding(123, 3)
+    '123'
+    >>> format_index_with_padding(0, 4)
+    '0000'
     """
     desired_length = desired_length or len(str(raw_index))
 

@@ -6,14 +6,84 @@ import pymupdf
 from config.file_management import TEXT_BOUNDARIES_PAGE
 from utils import format_index_with_padding
 
+@dataclass(frozen=True)
+class ContextualQA:
+    """Represents a set of questions with their context and answers.
+
+    Attributes:
+    id : str
+        Unique identifier for the completion.
+    context : str
+        Contextual information related to the questions.
+    questions : List[str]
+        List of questions.
+    answers : List[str]
+        List of answers corresponding to the questions.
+    """
+    id: str
+    context: str
+    questions: List[str]
+    answers: List[str]
+
+    @classmethod
+    def from_dict(cls, content: Dict[str, Any]) -> 'ContextualQA':
+        """Creates a `ContextualQA` instance from a dictionary.
+        
+        Raises a ValueError if required fields are missing or TypeError
+        if fields have incorrect types.
+        """
+        missing_fields = [
+            field for field in ["completion_id", "context", "questions", "answers"]
+            if field not in content]
+        if missing_fields:
+            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
+
+        if (not isinstance(content["completion_id"], str) or
+            not isinstance(content["context"], str)):
+            raise TypeError("Fields 'completion_id' and 'context' must be strings.")
+
+        if (not isinstance(content["questions"], list) or
+            not isinstance(content["answers"], list)):
+            raise TypeError("Fields 'questions' and 'answers' must be lists.")
+
+        return cls(
+            id=content["completion_id"],
+            context=content["context"],
+            questions=content["questions"],
+            answers=content["answers"]
+        )
+
+    def __str__(self):
+        return f'Completion {self.id}'
+
+    def __repr__(self):
+        return f'{self.id}: \"{self.questions}\" [\"{self.answers}\"]'
 
 class TextChunk:
+    """Represents a chunk of text with associated metadata and methods
+    for serialization and representation.
+
+    Attributes
+    ----------
+    id : str
+        Unique identifier for the text chunk.
+    raw_content : str
+        The original text content.
+    processed_content : str
+        The processed version of the text content.
+    embedding : List[float]
+        A list representing the embedding of the text content.
+
+    Methods
+    -------
+    `serialize_content(raw=False, processed=False, embedding=False)` -> Dict[str, Any]
+        Retrieve specified content from the TextChunk instance."""
 
     processed_content: str = ""
     embedding: List[float] = []
 
-    def __init__(self, number: int, content: str) -> None:
-        self.number = number
+    def __init__(self, id: str, content: str) -> None:
+        self.id = id
         self.raw_content = content
 
     def serialize_content(
@@ -52,10 +122,20 @@ class TextChunk:
         return len(self.raw_content)
 
     def __str__(self):
-        return f'Raw Chunk: "{self.raw_content}", Processed Chunk: "{self.raw_content}", Chunk Embedding: {self.embedding}'
+        return self.raw_content
 
     def __repr__(self):
-        return self.raw_content
+        attributes = [
+            attr for attr in ["raw_content", "processed_content", "embedding"]
+            if getattr(self, attr, None)
+        ]
+
+        formatted_attrs = " and ".join(
+            [", ".join(attributes[:-1]), attributes[-1]] if len(attributes) > 1 else attributes
+        ) or "none"
+
+        return f"{self.__class__} at {hex(id(self))} with attributes {formatted_attrs} valued"
+        
 
 class Page:
     """It represents a page of a document and collects blocks of text
@@ -94,11 +174,15 @@ class Page:
         w, h = self.content.artbox.bottom_right
 
         boundaries = self.calculate_boundaries(w, h)
-        return [
-            TextChunk(i, content=block[4])
-            for i, block in enumerate(self.content.get_text(option="blocks", clip=boundaries)) # type: ignore
-            if block[4].strip()
-        ]
+        chunks: List[TextChunk] = []
+        for i, block in enumerate(self.content.get_text(option="blocks", clip=boundaries)): # type: ignore
+            if block[4].strip():
+                # fmt_num = format_index_with_padding(i, len(str(len(self))))
+                chunks.append(TextChunk(
+                    id=f"{self.number}_{i}",
+                    content=block[4]
+                ))
+        return chunks
 
     def calculate_boundaries(
             self,
@@ -190,7 +274,7 @@ class Page:
         return len(self.chunks)
 
     def __str__(self):
-        return f'Page number {self.number}: {self.chunks}'
+        return f'{"| ".join(str(chk) for chk in self.chunks)}'
 
     def __repr__(self):
         return str(self.content)
@@ -230,10 +314,10 @@ class DocInfo:
         )
 
     def __str__(self):
-        return f'File {self.id}: {self.title} ["{self.embed_link}"]'
+        return f'{self.id} - {self.title}'
 
     def __repr__(self):
-        return f'{self.id}: \"{self.title}\" [\"{self.embed_link}\"]'
+        return f"{self.__class__} at {hex(id(self))} of \"{self.embed_link}\""
 
 class Document:
     """It represents a document composed of multiple pages and

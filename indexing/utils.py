@@ -1,7 +1,6 @@
 import base64
 import binascii
 import hashlib
-import os
 from secrets import token_bytes
 from typing import Optional, Set, Union
 import uuid as uuid_lib

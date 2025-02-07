@@ -7,7 +7,7 @@ from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 import pymupdf
 
-import config
+import config.logging
 from config.file_management import PDF_SOURCE_FOLDER, OVERWRITE_IF_EXISTS, UNIQUE_IF_EXISTS
 from indexing.components import DocInfo, Document, Page
 from indexing.utils import UUIDManager
@@ -16,11 +16,7 @@ from logger.setup import LoggerManager
 
 logger_manager = LoggerManager(
     module_name=__name__,
-    project_name=config.LOGGING["project_name"],
-    folder_path=config.LOGGING["folder_path"],
-    max_size=config.LOGGING["max_size"],
-    console_level=config.LOGGING["console_level"],
-    file_level=config.LOGGING["file_level"],
+    project_name=config.logging.PROJECT_NAME
 )
 logger_manager.setup_logger()
 

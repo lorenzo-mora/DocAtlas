@@ -10,20 +10,15 @@ from redis.commands.search.field import (
 )
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 
-import config
+import config.logging
 from config.chroma import PERSIST_DIRRECTORY
 from config.redis import DISTANCE_METRIC, INDEX_NAME, INDEX_TYPE
 from indexing.components import ContextualQA, Document
 from logger.setup import LoggerManager
-from utils import format_index_with_padding
 
 logger_manager = LoggerManager(
     module_name=__name__,
-    project_name=config.LOGGING["project_name"],
-    folder_path=config.LOGGING["folder_path"],
-    max_size=config.LOGGING["max_size"],
-    console_level=config.LOGGING["console_level"],
-    file_level=config.LOGGING["file_level"],
+    project_name=config.logging.PROJECT_NAME
 )
 logger_manager.setup_logger()
 

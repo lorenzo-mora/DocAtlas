@@ -6,4 +6,4 @@ FIXED_EMBEDDING_LENGTH: Optional[int] = None
 
 # The identifier of the pre-trained sentence transformer model for
 # producing sentence embeddings.
-MODEL_SENTENCE_TRANSFORMER = 'all-MiniLM-L6-v2'
+MODEL_SENTENCE_TRANSFORMER: str = 'all-MiniLM-L6-v2'

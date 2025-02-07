@@ -3,7 +3,7 @@ import json_repair
 from openai.types.chat.chat_completion import ChatCompletion
 
 from ai_tools import LLMManager
-import config
+import config.logging
 from config.training import PROMPT_FILE_PATH
 from indexing.components import ContextualQA
 from logger.setup import LoggerManager
@@ -12,11 +12,7 @@ from storage_utils.yaml_handler import YAMLManager
 
 logger_manager = LoggerManager(
     module_name=__name__,
-    project_name=config.LOGGING["project_name"],
-    folder_path=config.LOGGING["folder_path"],
-    max_size=config.LOGGING["max_size"],
-    console_level=config.LOGGING["console_level"],
-    file_level=config.LOGGING["file_level"],
+    project_name=config.logging.PROJECT_NAME
 )
 logger_manager.setup_logger()
 

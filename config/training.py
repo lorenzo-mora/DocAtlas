@@ -1,3 +1,6 @@
+from typing import Union
+
+
 PROMPT_FILE_PATH: str = "./training/prompt.yaml"
 
 MODEL: str = "gpt-4o-mini"

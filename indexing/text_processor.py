@@ -13,7 +13,7 @@ import spacy
 import spacy.tokens
 from textblob import TextBlob
 
-import config
+import config.logging
 from config.embedding import FIXED_EMBEDDING_LENGTH, MODEL_SENTENCE_TRANSFORMER
 from config.processing_text import INSTALL_MISSING_NLTK, MIN_CHUNK_LENGTH, STEPS
 from indexing.components import Document
@@ -23,11 +23,7 @@ from logger.setup import LoggerManager
 
 logger_manager = LoggerManager(
     module_name=__name__,
-    project_name=config.LOGGING["project_name"],
-    folder_path=config.LOGGING["folder_path"],
-    max_size=config.LOGGING["max_size"],
-    console_level=config.LOGGING["console_level"],
-    file_level=config.LOGGING["file_level"],
+    project_name=config.logging.PROJECT_NAME
 )
 logger_manager.setup_logger()
 

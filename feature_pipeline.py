@@ -1,9 +1,11 @@
 import datetime
 from pathlib import Path
 
-import config
+from config import schema
 from config.chroma import AUTHOR
 import config.file_management
+import config.logging
+from config.validation import ConfigurationError, validate_config
 from indexing.text_processor import TextProcessor
 from logger.setup import LoggerManager
 from storage_utils.db_hanler import DocumentCollectionHandler
@@ -12,7 +14,7 @@ from storage_utils.pdf_handler import PDFHandler
 
 def run():
     logger_manager.log_message(
-        "The document indexing pipeline is executed.", "INFO")
+        f"{chr(0x2699)} The document indexing pipeline is executed.", "INFO")
 
     mgr = PDFHandler()  # PDF file manager
     processor = TextProcessor()  # Document textual content processor
@@ -74,13 +76,26 @@ def run():
 
 if __name__ == "__main__":
 
+    try:
+        validate_config("config.chroma", schema.chroma_parameters)
+        validate_config("config.embedding", schema.embedding_parameters)
+        validate_config("config.file_management", schema.file_management_parameters)
+        validate_config("config.logging", schema.logging_parameters)
+        validate_config("config.processing_text", schema.processing_text_parameters)
+        validate_config("config.redis", schema.redis_parameters)
+        validate_config("config.training", schema.training_parameters)
+
+    except ConfigurationError as e:
+        raise Exception(f"{chr(0x274C)} Configuration Error: {e}")
+
     logger_manager = LoggerManager(
         module_name=__name__,
-        project_name=config.LOGGING["project_name"],
-        folder_path=config.LOGGING["folder_path"],
-        max_size=config.LOGGING["max_size"],
-        console_level=config.LOGGING["console_level"],
-        file_level=config.LOGGING["file_level"],
+        project_name=config.logging.PROJECT_NAME,
+        folder_path=config.logging.FOLDER_PATH,
+        max_file_size=config.logging.MAX_SIZE,
+        console_level=config.logging.CONSOLE_LEVEL,
+        file_level=config.logging.FILE_LEVEL,
+        console_message_format=config.logging.CONSOLE_MESSAGE_FORMAT
     )
     logger_manager.setup_logger()
 

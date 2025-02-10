@@ -4,6 +4,7 @@ from typing import Any, Dict, Literal, Optional, Tuple, Union
 
 from bs4 import BeautifulSoup
 import contractions
+from huggingface_hub.utils.logging import disable_propagation
 import nltk
 from nltk.corpus import wordnet
 from nltk.tokenize import word_tokenize, TreebankWordDetokenizer
@@ -13,19 +14,15 @@ import spacy
 import spacy.tokens
 from textblob import TextBlob
 
-import config.logging
 from config.embedding import FIXED_EMBEDDING_LENGTH, MODEL_SENTENCE_TRANSFORMER
 from config.processing_text import INSTALL_MISSING_NLTK, MIN_CHUNK_LENGTH, STEPS
 from indexing.components import Document
 from logger.helper import timed_block
-from logger.setup import LoggerManager
+from logger.setup import LoggerHandler
 
 
-logger_manager = LoggerManager(
-    module_name=__name__,
-    project_name=config.logging.PROJECT_NAME
-)
-logger_manager.setup_logger()
+disable_propagation()
+logger = LoggerHandler().get_logger(__name__)
 
 class TextProcessor:
     """A class for processing text data, including cleaning,
@@ -98,10 +95,7 @@ class TextProcessor:
         try:
             self.nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
         except Exception as e:
-            logger_manager.log_message(
-                f"Error loading model `en_core_web_sm`: {e}",
-                "ERROR"
-            )
+            logger.error(f"Error loading model `en_core_web_sm`: {e}")
             raise
 
         try:
@@ -110,20 +104,15 @@ class TextProcessor:
                 truncate_dim = fixed_length
             )
         except Exception as e:
-            logger_manager.log_message(
-                f"Error during instantiation of SentenceTransformer: {e}",
-                "ERROR"
-            )
+            logger.error(f"Error during instantiation of SentenceTransformer: {e}")
             raise
 
         self.embedding_size = self.embedder_model.get_sentence_embedding_dimension() or 384
 
         self._init_procedures()
 
-        logger_manager.log_message(
-            f"Successfully initialised the {self.__class__.__name__} instance.",
-            "DEBUG"
-        )
+        logger.debug(
+            f"Successfully initialised the {self.__class__.__name__} instance.")
 
     def clean_text(
             self,
@@ -137,11 +126,9 @@ class TextProcessor:
         """
         if (isinstance(chunk_length, int) and chunk_length <= 0 or
             not isinstance(chunk_length, int) and chunk_length is not None):
-            logger_manager.log_message(
+            logger.error(
                 ("The minimum length of the chunks must be a positive integer. "
-                f"Instead, {chunk_length} has been provided."),
-                "ERROR"
-            )
+                f"Instead, {chunk_length} has been provided."))
             raise ValueError("`chunk_length` must be a positive integer")
 
         text = self._validate_text(
@@ -220,11 +207,7 @@ class TextProcessor:
         try:
             return BeautifulSoup(text, "html.parser").get_text().strip()
         except Exception as e:
-            logger_manager.log_message(
-                f"Error parsing HTML: {e}",
-                "ERROR",
-                exc_info=True
-            )
+            logger.error(f"Error parsing HTML: {e}", exc_info=True)
             return ""
 
     def expand_contractions(self, text: str) -> str:
@@ -237,11 +220,7 @@ class TextProcessor:
         try:
             return contractions.fix(text, slang=True) # type: ignore
         except Exception as e:
-            logger_manager.log_message(
-                f"Error expanding contractions: {e}",
-                "ERROR",
-                exc_info=True
-            )
+            logger.error(f"Error expanding contractions: {e}", exc_info=True)
             return text
 
     def remove_digits(self, text: str) -> str:
@@ -264,11 +243,8 @@ class TextProcessor:
         try:
             return str(TextBlob(text).correct())
         except Exception as e:
-            logger_manager.log_message(
-                f"Error during spelling correction: {e}",
-                "ERROR",
-                exc_info=True
-            )
+            logger.error(
+                f"Error during spelling correction: {e}", exc_info=True)
             return text
 
     def replace_synonym(self, text: str) -> str:
@@ -352,19 +328,16 @@ class TextProcessor:
 
     def process_text(self, file: Document) -> None:
         """Application of all pre-processing steps in the order they are specified in the configuration."""
-        logger_manager.log_message(
-            f"Text processing of the file `{file.metadata.title}` has begun.",
-            "INFO"
-        )
+        logger.info(
+            f"Text processing of the file `{file.metadata.title}` has begun.")
 
-        with timed_block(f"Document processing took", logger_manager.get_logger()):
+        with timed_block(f"Document processing took", logger):
             for page in file.pages:
                 step = int(len(page) * 0.2)  # Log about every 20% of completion
                 for chunk_i, chunk in enumerate(page.chunks):
                     if bool(chunk.processed_content):
                         # Text processing for this chunk has already been done
-                        logger_manager.log_message(
-                            "Chunk already processed; it is skipped.", "WARNING")
+                        logger.warning("Chunk already processed; it is skipped.")
                         continue
 
                     processed_text = chunk.raw_content
@@ -377,56 +350,45 @@ class TextProcessor:
 
                     if step != 0 and (chunk_i + 1) % step == 0:
                         progress = (chunk_i + 1) / len(page) * 100
-                        logger_manager.log_message(
-                            f"{progress:.0f}% of page {page.number} text processing completed.",
-                            "DEBUG"
+                        logger.debug(
+                            f"{progress:.0f}% of page {page.number} text processing completed."
                         )
-                logger_manager.log_message(
-                    f"Page {page.number} successfully processed.", "DEBUG")
+                logger.debug(f"Page {page.number} successfully processed.")
 
-        logger_manager.log_message(
-            "Processing of current document content successfully completed.",
-            "INFO"
-        )
+        logger.debug(
+            "Processing of current document content successfully completed.")
 
     def compute_embedding(self, file: Document) -> None:
         """Compute the embeddings of the processed text chunks using the
         `SentenceTransformer` model."""
         self.process_text(file)
 
-        logger_manager.log_message(
-            f"Embedding generation for the document `{file.metadata.title}`.",
-            "INFO"
-        )
+        logger.info(
+            f"Embedding generation for the document `{file.metadata.title}`.")
 
         # Generate embeddings for the proocessed text using the
         # SentenceTransformer model
         for page in file.pages:
-            with timed_block(f"Embedding generation for page {page.number} took", logger_manager.get_logger()):
+            with timed_block(f"Embedding generation for page {page.number} took", logger):
 
                 step = int(len(page) * 0.22)  # Log about every 22% of completion
                 for chunk_i, chunk in enumerate(page.chunks):
 
                     if step != 0 and (chunk_i + 1) % step == 0:
                         progress = (chunk_i + 1) / len(page) * 100
-                        logger_manager.log_message(
-                            f"{progress:.0f}% of the embeddings generation completed",
-                            "DEBUG"
-                        )
+                        logger.debug(
+                            f"{progress:.0f}% of the embeddings generation completed")
 
                     if chunk.processed_content:
                         try:
                             chunk.embedding = self.embedder_model.encode(
                                 chunk.processed_content, convert_to_tensor=True).tolist()
                         except Exception as e:
-                            logger_manager.log_message(
-                                f"Error in the generation of the embedding: {e}",
-                                "WARNING"
-                            )
+                            logger.warning(
+                                f"Error in the generation of the embedding: {e}")
                             chunk.embedding = [-0.0]*self.embedding_size
 
-        logger_manager.log_message(
-            "Embeddings for the current document were elaborated.", "INFO")
+        logger.info("Embeddings for the current document were elaborated.")
 
     def _validate_text(
             self,
@@ -461,17 +423,14 @@ class TextProcessor:
                 if isinstance(expected_type, tuple) else expected_type.__name__
             )
             if not isinstance(text, expected_type):
-                logger_manager.log_message(
+                logger.error(
                     (f"Invalid input type for `text` in `{method_name}` method. "
-                    f"Expected '{expected_types}', got '{type(text).__name__}'."),
-                    "ERROR"
-                )
+                    f"Expected '{expected_types}', got '{type(text).__name__}'."))
                 raise TypeError(f"Input must be of type '{expected_types}'")
             return text
         except Exception as e:
-            logger_manager.log_message(
+            logger.error(
                 f"Exception occurred during text validation in `{method_name}`: {e}",
-                "ERROR",
                 exc_info=True
             )
             raise
@@ -519,28 +478,22 @@ class TextProcessor:
         self.id_is_active = any(self.in_depth.values())
 
         if not self.ff_is_active and  not self.id_is_active:
-            logger_manager.log_message(
-                "No procedure was activated neither `fastForward` nor `inDepth`.",
-                "WARNING"
-            )
+            logger.warning(
+                "No procedure was activated neither `fastForward` nor `inDepth`.")
         else:
             if self.ff_is_active and self.id_is_active:
-                logger_manager.log_message(
+                logger.warning(
                     ("Both the `fastForward` and `inDepth` procedures have been "
                     "activated, but only one of them can be applied. The "
-                    "`fastForward` procedure is applied."),
-                    "WARNING"
-                )
+                    "`fastForward` procedure is applied.")
+            )
 
-
-            logger_manager.log_message(
+            logger.debug(
                 "Text is processed through the `{}` procedure(s): '{}'.".format(
                     "fastForward" if self.ff_is_active else "inDepth",
                     "', '".join(list(self.fast_forward.keys()))
                     if self.ff_is_active else "', '".join(list(self.in_depth.keys()))
-                ),
-                "DEBUG"
-            )
+            ))
 
         self._check_nltk_dependencies(force_installation)
 
@@ -551,15 +504,12 @@ class TextProcessor:
             wordnet.ensure_loaded()
         except LookupError:
             if force_installation:
-                logger_manager.log_message(
-                    "The Wordnet corpus is not available, so it is downloaded.",
-                    "WARNING"
-                )
+                logger.warning(
+                    "The Wordnet corpus is not available, so it is downloaded.")
                 nltk.download('wordnet')
             else:
-                logger_manager.log_message(
-                    "Wordnet corpus is not available. Please download it using nltk.download('wordnet').",
-                    "WARNING"
+                logger.warning(
+                    "Wordnet corpus is not available. Please download it using nltk.download('wordnet')."
                 )
                 self.synonym_replacement_available = False
 
@@ -568,15 +518,12 @@ class TextProcessor:
             nltk.data.find('tokenizers/punkt')
         except LookupError:
             if force_installation:
-                logger_manager.log_message(
-                    "The Punkt data is not available, so it is downloaded.",
-                    "WARNING"
-                )
+                logger.warning(
+                    "The Punkt data is not available, so it is downloaded.")
                 nltk.download('punkt')
             else:
-                logger_manager.log_message(
-                    "Punkt data is not available. Please download it using nltk.download('punkt').",
-                    "WARNING"
+                logger.warning(
+                    "Punkt data is not available. Please download it using nltk.download('punkt')."
                 )
                 self.synonym_replacement_available = False
 
@@ -585,15 +532,12 @@ class TextProcessor:
             nltk.data.find('taggers/averaged_perceptron_tagger_eng')
         except LookupError:
             if force_installation:
-                logger_manager.log_message(
-                    "Tagger data is not available, so it is downloaded.",
-                    "WARNING"
-                )
+                logger.warning(
+                    "Tagger data is not available, so it is downloaded.")
                 nltk.download('averaged_perceptron_tagger_eng')
             else:
-                logger_manager.log_message(
-                    "Tagger data is not available. Please download it using nltk.download('averaged_perceptron_tagger_eng').",
-                    "WARNING"
+                logger.warning(
+                    "Tagger data is not available. Please download it using nltk.download('averaged_perceptron_tagger_eng')."
                 )
                 self.synonym_replacement_available = False
 
@@ -622,10 +566,9 @@ class TextProcessor:
         """
         err = set(procedures) - set(valid_procedures)
         if err:
-            logger_manager.log_message(
+            logger.error(
                 (f"`{procedure_type}` procedures can only be '{"', '".join(valid_procedures)}'. "
-                 f"Instead, {', '.join(err)} were also provided."),
-                "ERROR"
+                 f"Instead, {', '.join(err)} were also provided.")
             )
             raise KeyError(f"Invalid procedure(s): {', '.join(err)}")
 

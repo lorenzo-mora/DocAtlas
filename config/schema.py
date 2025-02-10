@@ -3,6 +3,7 @@ from typing import Dict, Literal, Optional, Tuple
 
 chroma_parameters = {
     "PERSIST_DIRRECTORY": str,
+    "ANONYMIZED_TELEMETRY": bool,
     "AUTHOR": str
 }
 
@@ -24,12 +25,14 @@ file_management_parameters = {
 }
 
 logging_parameters = {
-    "PROJECT_NAME": str,
     "FOLDER_PATH": str,
     "MAX_SIZE": int,
+    "MAX_NUM_FILE": int,
     "CONSOLE_LEVEL": Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
     "FILE_LEVEL": Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-    "CONSOLE_MESSAGE_FORMAT": Optional[str]
+    "CONSOLE_MESSAGE_FORMAT": Optional[str],
+    "CONSOLE_DATE_FORMAT": Optional[str],
+    "FILE_DATE_FORMAT": Optional[str]
 }
 
 processing_text_parameters = {

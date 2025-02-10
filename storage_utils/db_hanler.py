@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Literal, Optional
 import chromadb
+from chromadb.config import Settings
 import redis
 from redis.commands.search.field import (
     NumericField,
@@ -10,18 +11,13 @@ from redis.commands.search.field import (
 )
 from redis.commands.search.indexDefinition import IndexDefinition, IndexType
 
-import config.logging
-from config.chroma import PERSIST_DIRRECTORY
+from config.chroma import PERSIST_DIRRECTORY, ANONYMIZED_TELEMETRY
 from config.redis import DISTANCE_METRIC, INDEX_NAME, INDEX_TYPE
 from indexing.components import ContextualQA, Document
-from logger.setup import LoggerManager
+from logger.setup import LoggerHandler
 
-logger_manager = LoggerManager(
-    module_name=__name__,
-    project_name=config.logging.PROJECT_NAME
-)
-logger_manager.setup_logger()
 
+logger = LoggerHandler().get_logger(__name__)
 
 class BaseDBHandler(ABC):
     """Abstract base class for database handlers.
@@ -62,14 +58,16 @@ class ChromaHandler(BaseDBHandler):
             persist_directory: str
         ) -> None:
         self.persist_path = persist_directory
-        self.client = chromadb.PersistentClient(path=self.persist_path)
+        self.client = chromadb.PersistentClient(
+            path=self.persist_path,
+            settings=Settings(anonymized_telemetry=ANONYMIZED_TELEMETRY)
+        )
 
         if (not isinstance(collection_name, str) or
             collection_name.lower() not in ("documents", "contextual_questions_answers")):
-            logger_manager.log_message(
+            logger.error(
                 "The name of the collection may be one of (\"documents\", "
-                f"\"contextual_questions_answers\"). Instead, {collection_name} is provided.",
-                "ERROR"
+                f"\"contextual_questions_answers\"). Instead, {collection_name} is provided."
             )
             raise ValueError("Collection name not recognised")
 
@@ -79,17 +77,15 @@ class ChromaHandler(BaseDBHandler):
             metadata=collection_metadata
         )
 
-        logger_manager.log_message(
+        logger.debug(
             (f"Successfully initialised the instance {self.__class__.__name__} "
-             f"with the collection {self.name} at path {self.persist_path}."),
-            "DEBUG"
-        )
+             f"with the collection {self.name} at path {self.persist_path}."))
 
     def get_current_ids(self) -> List[str]:
         """Retrieve the current unique IDs from the collection."""
         current_ids = self.collection.get()['ids']
         if not current_ids:
-            logger_manager.log_message("The collection is empty.", "DEBUG")
+            logger.debug("The collection is empty.")
         return list({index.split('_')[0] for index in current_ids})
 
 class DocumentCollectionHandler(ChromaHandler):
@@ -148,25 +144,20 @@ class DocumentCollectionHandler(ChromaHandler):
             If an error occurs while adding a chunk to the collection.
         """
         if self.name != "documents":
-            logger_manager.log_message(
-                "Wrong collection to add a document to. The correct one is \"documents\".",
-                "ERROR"
+            logger.error(
+                "Wrong collection to add a document to. The correct one is \"documents\"."
             )
             raise ValueError("Wrong collection")
 
         if not isinstance(doc, Document):
-            logger_manager.log_message(
+            logger.error(
                 (f"A document of the wrong type was provided: `{type(doc)}` "
-                 "instead of `Document`."),
-                "ERROR"
+                 "instead of `Document`.")
             )
             raise TypeError(
                 f"`doc` must be a Document instance, not a {type(doc)}")
 
-        logger_manager.log_message(
-            f"Inserting the `{doc.metadata.title}` document into the DB.",
-            "INFO"
-        )
+        logger.info(f"Inserting the `{doc.metadata.title}` document into the DB.")
         step = int(len(doc) * 0.3)  # Log about every 30% of completion
         for page_i, page in enumerate(doc.pages):
 
@@ -189,11 +180,9 @@ class DocumentCollectionHandler(ChromaHandler):
                     })
 
             if not batch_embeddings:
-                logger_manager.log_message(
+                logger.warning(
                     (f"None of the chunks on the {page.number} page have valid "
-                     "text; insertion skipped."),
-                    "WARNING"
-                )
+                     "text; insertion skipped."))
                 continue
             try:
 
@@ -204,19 +193,14 @@ class DocumentCollectionHandler(ChromaHandler):
                     metadatas=batch_metadatas
                 )
             except Exception as e:
-                logger_manager.log_message(
-                    f"Error adding chunks of page {page.number}: {e}", "ERROR")
+                logger.error(f"Error adding chunks of page {page.number}: {e}")
                 raise
 
             if step != 0 and (page_i + 1) % step == 0:
                 progress = (page_i + 1) / len(doc) * 100
-                logger_manager.log_message(
-                    f"First {page_i+1} pages added to DB [{progress:.0f}%].",
-                    "DEBUG"
-                )
+                logger.debug(f"First {page_i+1} pages added to DB [{progress:.0f}%].")
 
-        logger_manager.log_message(
-            "Insertion of the current document completed successfully.", "INFO")
+        logger.info("Insertion of the current document completed successfully.")
 
 class CQACollectionHandler(ChromaHandler):
 
@@ -236,18 +220,16 @@ class CQACollectionHandler(ChromaHandler):
             cqa: ContextualQA
         ) -> None:
         if self.name != "contextual_questions_answers":
-            logger_manager.log_message(
+            logger.error(
                 ("Wrong collection to add a context-questions-answers "
-                 "completion. The correct one is \"contextual_questions_answers\"."),
-                "ERROR"
+                 "completion. The correct one is \"contextual_questions_answers\".")
             )
             raise ValueError("Wrong collection")
         if not isinstance(cqa, ContextualQA):
             raise TypeError(
                 f"`cqa` must be a ContextualizedQuestions instance, not a {type(cqa)}")
 
-        logger_manager.log_message(
-            f"Inputting current questions and answers into the DB.", "INFO")
+        logger.info(f"Inputting current questions and answers into the DB.")
 
         cqa_ids = [f"{cqa.id}_{i}" for i in range(3)]
         try:
@@ -257,8 +239,7 @@ class CQACollectionHandler(ChromaHandler):
                 metadatas=batch_metadatas
             )
         except Exception as e:
-            logger_manager.log_message(
-                f"Error adding chunks of page {page.number}: {e}", "ERROR")
+            logger.error(f"Error adding chunks of page {page.number}: {e}")
 
 class RedisHandler(BaseDBHandler):
 

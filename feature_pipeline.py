@@ -7,14 +7,26 @@ import config.file_management
 import config.logging
 from config.validation import ConfigurationError, validate_config
 from indexing.text_processor import TextProcessor
-from logger.setup import LoggerManager
+from logger.setup import LoggerHandler
 from storage_utils.db_hanler import DocumentCollectionHandler
 from storage_utils.pdf_handler import PDFHandler
 
 
+log_handler = LoggerHandler(
+    folder_path=config.logging.FOLDER_PATH,
+    max_file_size=config.logging.MAX_SIZE,
+    backup_count=config.logging.MAX_NUM_FILE,
+    console_level=config.logging.CONSOLE_LEVEL,
+    file_level=config.logging.FILE_LEVEL,
+    console_message_format=config.logging.CONSOLE_MESSAGE_FORMAT,
+    console_date_format=config.logging.CONSOLE_DATE_FORMAT,
+    file_date_format=config.logging.FILE_DATE_FORMAT
+)
+log_handler.setup(component="feature_pipeline")
+logger = log_handler.get_logger("feature_pipeline")
+
 def run():
-    logger_manager.log_message(
-        f"{chr(0x2699)} The document indexing pipeline is executed.", "INFO")
+    logger.info(f"{chr(0x2699)} The document indexing pipeline is executed.")
 
     mgr = PDFHandler()  # PDF file manager
     processor = TextProcessor()  # Document textual content processor
@@ -32,30 +44,22 @@ def run():
 
     try:
         if Path(config.file_management.source_path).is_dir():
-            logger_manager.log_message(
-                "Specified path points to a folder. The entire content is downloaded.",
-                "INFO"
+            logger.info(
+                "Specified path points to a folder. The entire content is downloaded."
             )
             mgr.get_all_pdf_from_local_folder(config.file_management.source_path)
         else:
-            logger_manager.log_message(
-                "Specified path points to a single file.",
-                "INFO"
-            )
+            logger.info("Specified path points to a single file.")
             mgr.get_pdf_from_local(config.file_management.source_path, force=False)
     except Exception as e:
-        logger_manager.log_message(
+        logger.error(
             f"Error retrieving file `{config.file_management.source_path}`: {e}",
-            level="ERROR",
             exc_info=True
         )
         raise
 
     if not mgr.docs_info:
-        logger_manager.log_message(
-            f"There is no file to be analysed",
-            level="Warning"
-        )
+        logger.warning(f"There is no file to be analysed")
         exit(0)
 
     for file in mgr.docs_info:
@@ -66,16 +70,12 @@ def run():
 
     for doc in mgr.docs:
         chroma.add_entry(doc, stricted=True)
-        logger_manager.log_message(
-            f"Document {doc.metadata.id} [{doc.metadata.title}] completed.",
-            "INFO"
-        )
+        logger.info(f"Document {doc.metadata.id} [{doc.metadata.title}] completed.")
 
-    logger_manager.log_message("Pipeline successfully executed.", "INFO")
+    logger.info("Pipeline successfully executed.")
 
 
 if __name__ == "__main__":
-
     try:
         validate_config("config.chroma", schema.chroma_parameters)
         validate_config("config.embedding", schema.embedding_parameters)
@@ -87,16 +87,5 @@ if __name__ == "__main__":
 
     except ConfigurationError as e:
         raise Exception(f"{chr(0x274C)} Configuration Error: {e}")
-
-    logger_manager = LoggerManager(
-        module_name=__name__,
-        project_name=config.logging.PROJECT_NAME,
-        folder_path=config.logging.FOLDER_PATH,
-        max_file_size=config.logging.MAX_SIZE,
-        console_level=config.logging.CONSOLE_LEVEL,
-        file_level=config.logging.FILE_LEVEL,
-        console_message_format=config.logging.CONSOLE_MESSAGE_FORMAT
-    )
-    logger_manager.setup_logger()
 
     run()

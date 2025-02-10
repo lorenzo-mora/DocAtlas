@@ -1,10 +1,11 @@
 import importlib
 from typing import Any, Dict, List, Literal, Tuple, get_args, get_origin
 
-from logger.setup import LoggerManager
+from logger.setup import LoggerHandler
 
-logger_manager = LoggerManager(module_name=__name__, project_name="docatlas", console_message_format='%(asctime)s | %(levelname)s --> %(message)s')
-logger_manager.setup_logger()
+# logger_manager = LoggerManager(module_name=__name__, project_name="docatlas", console_message_format='%(asctime)s | %(levelname)s --> %(message)s')
+# logger_manager.setup_logger()
+logger = LoggerHandler().get_logger(__name__)
 
 class ConfigurationError(Exception):
     """Exception raised for errors in the configuration validation."""
@@ -115,8 +116,9 @@ def validate_config(module_name: str, schema: Dict[str, Any]):
     try:
         config = importlib.import_module(module_name)
     except ModuleNotFoundError as e:
+        print("Calling 119 - validation.py")
         error_message = f"Configuration module '{module_name}' not found."
-        logger_manager.log_message(error_message, "ERROR")
+        logger.error(error_message)
         raise ConfigurationError(error_message) from e
 
     config_vars = {k: v for k, v in vars(config).items() if not k.startswith("__")}
@@ -131,9 +133,8 @@ def validate_config(module_name: str, schema: Dict[str, Any]):
 
     if errors:
         error_message = f"Validation failed for {module_name}: " + " -- ".join(err for err in errors)
-        logger_manager.log_message(error_message, "ERROR")
+        logger.error(error_message)
         raise ConfigurationError(error_message)
 
     # Log validation results
-    logger_manager.log_message(
-        f"{chr(0x2705)} Validation passed for `{module_name}`.", "DEBUG")
+    logger.debug(f"{chr(0x2705)} Validation passed for `{module_name}`.")

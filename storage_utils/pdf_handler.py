@@ -7,18 +7,13 @@ from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 import pymupdf
 
-import config.logging
 from config.file_management import PDF_SOURCE_FOLDER, OVERWRITE_IF_EXISTS, UNIQUE_IF_EXISTS
 from indexing.components import DocInfo, Document, Page
 from indexing.utils import UUIDManager
-from logger.setup import LoggerManager
+from logger.setup import LoggerHandler
 
 
-logger_manager = LoggerManager(
-    module_name=__name__,
-    project_name=config.logging.PROJECT_NAME
-)
-logger_manager.setup_logger()
+logger = LoggerHandler().get_logger(__name__)
 
 class PDFHandler:
 
@@ -36,9 +31,8 @@ class PDFHandler:
         self.docs_info = []
         self.docs = []
 
-        logger_manager.log_message(
-            f"Successfully initialised the {self.__class__.__name__} instance.",
-            "DEBUG"
+        logger.debug(
+            f"Successfully initialised the {self.__class__.__name__} instance."
         )
 
     def _validate_data_source_folder(self, path: Union[str, Path]) -> Path:
@@ -101,8 +95,7 @@ class PDFHandler:
 
         # Initialize a list to store information about new files
         new_files = []
-        logger_manager.log_message(
-            "Downloading files from Google Drive...", "DEBUG")
+        logger.debug("Downloading files from Google Drive...")
 
         # Iterate through each file in the list
         for file in file_list:
@@ -118,16 +111,14 @@ class PDFHandler:
 
         # Print the list of newly downloaded files
         if len(new_files) == 0:
-            logger_manager.log_message("No new files were downloaded.", "DEBUG")
+            logger.debug("No new files were downloaded.")
             return
         
-        logger_manager.log_message(
-            f"{len(new_files)} new file(s) were detected.", "DEBUG")
-        logger_manager.log_message(
-            "- ".join([
-                f"Doc {i} => name: {f["title"]}, id: {f["id"]} "
-                for i, f in enumerate(new_files)
-            ]), "DEBUG")
+        logger.debug(f"{len(new_files)} new file(s) were detected.")
+        logger.debug("- ".join([
+            f"Doc {i} => name: {f["title"]}, id: {f["id"]} "
+            for i, f in enumerate(new_files)
+        ]))
 
         self.docs_info.extend(new_files)
 
@@ -156,9 +147,8 @@ class PDFHandler:
         existing_files = set(p.name for p in dest_folder.iterdir())
         counter = 1
         while file_name in existing_files:
-            logger_manager.log_message(
-                f"`{file_name}` file already exists in the destination.",
-                "WARNING")
+            logger.warning(
+                f"`{file_name}` file already exists in the destination.")
             file_name = f"{base_name}_{counter}{ext}"
             dest_path = dest_folder.joinpath(file_name)
             counter += 1
@@ -197,27 +187,23 @@ class PDFHandler:
                 "Specified path is empty or does not point to a file")
 
         if file_path.suffix.lower() != ".pdf":
-            logger_manager.log_message(
-                f"`{file_path.name}` file is not a PDF; it is skipped.", "WARNING")
+            logger.warning(
+                f"`{file_path.name}` file is not a PDF; it is skipped.")
             return
 
         dest_path = self.source_folder_path / file_path.name
         # Handle file existence logic
         if dest_path.exists():
             if force:
-                logger_manager.log_message(
-                    f"Overwriting `{dest_path.name}`.", "WARNING")
+                logger.warning(f"Overwriting `{dest_path.name}`.")
             elif unique:
                 _, dest_path = self.get_unique_file_path(dest_path)
-                logger_manager.log_message(
-                    f"Saving file as `{dest_path.name}` to avoid conflict.",
-                    "DEBUG"
+                logger.debug(
+                    f"Saving file as `{dest_path.name}` to avoid conflict."
                 )
             else:
-                logger_manager.log_message(
-                    f"File `{dest_path.name}` already exists; skipping copy.",
-                    "WARNING"
-                )
+                logger.warning(
+                    f"File `{dest_path.name}` already exists; skipping copy.")
                 return None
 
         # Perform the file copy operation
@@ -225,25 +211,21 @@ class PDFHandler:
             with open(file_path, 'rb') as src, open(dest_path, 'wb') as dst:
                 shutil.copyfileobj(src, dst)
         except FileNotFoundError as e:
-            logger_manager.log_message(
-                f"File not found: `{file_path}`. Error: {e}", "ERROR")
+            logger.error(f"File not found: `{file_path}`. Error: {e}")
             raise
         except PermissionError as e:
-            logger_manager.log_message(
+            logger.error(
                 f"Permission denied when accessing `{file_path}` or `{dest_path}`. Error: {e}", 
-                "ERROR"
             )
             raise
         except Exception as e:
-            logger_manager.log_message(
+            logger.error(
                 f"Unexpected error copying file `{file_path}` to `{dest_path}`: {e}", 
-                "ERROR"
             )
             raise
 
-        logger_manager.log_message(
+        logger.debug(
             f"File `{file_path.name}` was successfully saved as `{dest_path.name}`.",
-            "DEBUG"
         )
 
         info = DocInfo(
@@ -285,17 +267,14 @@ class PDFHandler:
             try:
                 dest = self.get_pdf_from_local(pdf_file)
             except Exception as e:
-                logger_manager.log_message(
-                    f"The file `{pdf_file}` is skipped due to an error: {e}",
-                    "WARNING"
-                )
+                logger.warning(
+                    f"The file `{pdf_file}` is skipped due to an error: {e}")
             if dest:
                 compatible_files.append(dest)
 
-        logger_manager.log_message(
+        logger.info(
             (f"Successfully retrieved the content of folder `{folder_path}`: "
-             f"{len(compatible_files)} new file(s) detected."),
-            "INFO")
+             f"{len(compatible_files)} new file(s) detected."))
         return compatible_files
 
     def process_pdf_file(
@@ -323,20 +302,16 @@ class PDFHandler:
             file.
         """
         if file_info.title.split('.')[-1].casefold() != 'pdf':
-            logger_manager.log_message(
-                f"File `{file_info.title}` is not a PDF; processing skipped.",
-                "ERROR"
-            )
+            logger.error(
+                f"File `{file_info.title}` is not a PDF; processing skipped.")
             return
 
-        logger_manager.log_message(
-            f"File name: {file_info.title}, id: {file_info.id}", "DEBUG")
+        logger.debug(f"File name: {file_info.title}, id: {file_info.id}")
 
         pdf_path = self.source_folder_path.joinpath(file_info.title)
         try:
             doc = pymupdf.open(pdf_path)
-            logger_manager.log_message(
-                f"Number of pages: {len(doc)}", "DEBUG")
+            logger.debug(f"Number of pages: {len(doc)}")
 
             pages = [
                 Page(i, content=page)
@@ -345,11 +320,8 @@ class PDFHandler:
 
             self.docs.append(Document(pages, info=file_info))
         except FileNotFoundError:
-            logger_manager.log_message(
-                f"File not found: {pdf_path}", "ERROR")
+            logger.error(f"File not found: {pdf_path}")
         except fitz.FileDataError:
-            logger_manager.log_message(
-                f"Corrupted PDF file: {pdf_path}", "ERROR")
+            logger.error(f"Corrupted PDF file: {pdf_path}")
         except Exception as e:
-            logger_manager.log_message(
-                f"Unexpected error processing file `{pdf_path}`: {e}", "ERROR")
+            logger.error(f"Unexpected error processing file `{pdf_path}`: {e}")

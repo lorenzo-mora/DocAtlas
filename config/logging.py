@@ -18,7 +18,7 @@ CONSOLE_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 FILE_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
 
 # The format in which messages are shown in the console.
-CONSOLE_MESSAGE_FORMAT: Optional[str] = '%(asctime)s | %(name)s [ln %(lineno)d] - %(levelname)s : %(message)s'
+CONSOLE_MESSAGE_FORMAT: Optional[str] = '%(asctime)s | %(levelname)s - %(name)s [%(lineno)d] : %(message)s'
 
 # The console format of the timestamp associated with the message.
 CONSOLE_DATE_FORMAT: Optional[str] = '%Y-%m-%d %H:%M:%S'

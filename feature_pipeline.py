@@ -20,9 +20,10 @@ log_handler = LoggerHandler(
     file_level=config.logging.FILE_LEVEL,
     console_message_format=config.logging.CONSOLE_MESSAGE_FORMAT,
     console_date_format=config.logging.CONSOLE_DATE_FORMAT,
-    file_date_format=config.logging.FILE_DATE_FORMAT
+    file_date_format=config.logging.FILE_DATE_FORMAT,
+    force_new_instance=True
 )
-log_handler.setup(component="feature_pipeline")
+log_handler.setup(namespace="feature_pipeline")
 logger = log_handler.get_logger("feature_pipeline")
 
 def run():

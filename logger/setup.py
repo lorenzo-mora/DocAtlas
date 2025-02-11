@@ -333,14 +333,14 @@ class LoggerManager:
                 extra=extra # type: ignore
             )
 
-class Singleton(type):
-    """A metaclass for creating Singleton classes.
+class WeakSingleton(type):
+    """A metaclass for creating weakly-referenced singleton classes.
 
-    This metaclass ensures that a class has only one instance, even if
-    constructed with different arguments. It uses a lock to ensure
+    This metaclass ensures that a class has only one instance per unique
+    combination of initialization arguments. It uses a lock to ensure
     thread safety during instance creation. The instance is stored in a
     dictionary with a key derived from the class and its initialization
-    arguments.
+    arguments, which are converted to a hashable form.
     """
     _instances = {}
     _lock = threading.Lock()
@@ -378,10 +378,40 @@ class Singleton(type):
                 )
 
             if key not in cls._instances:
-                cls._instances[key] = super(Singleton, cls).__call__(*args, **kwargs)
+                cls._instances[key] = super(WeakSingleton, cls).__call__(*args, **kwargs)
         return cls._instances[key]
 
-class LoggerHandler(metaclass=Singleton):
+class StrictSingleton(type):
+    """A metaclass for creating singleton classes with optional instance
+    reset.
+
+    This metaclass ensures that a class has only one instance, allowing,
+    when `force_new_instance` keyword argument is set to True during
+    instantiation, to reset the existing instance and create a new one.
+    """
+    _instances = {}
+
+    def __call__(cls, *args, **kwargs):
+        """Returns the singleton instance of the class, creating it if
+        it doesn't exist. If `force_new_instance` is True, the existing
+        instance is reset and a new instance is created. Otherwise, the
+        existing instance is returned if it exists; if not, a new
+        instance is created and stored.
+        """
+        force_new_instance = kwargs.pop("force_new_instance", False)
+
+        if force_new_instance or cls not in cls._instances:
+            cls._instances[cls] = super(StrictSingleton, cls).__call__(*args, **kwargs)
+
+        return cls._instances[cls]
+
+    @classmethod
+    def reset_instance(cls):
+        """Reset the stored singleton instance."""
+        if cls in cls._instances:
+            del cls._instances[cls]
+
+class LoggerHandler(metaclass=StrictSingleton):
     """A class to manage logging configuration for an application.
 
     This class provides methods to set up logging with console and file
@@ -440,6 +470,7 @@ class LoggerHandler(metaclass=Singleton):
             console_message_format: Optional[str] = None,
             console_date_format: Optional[str] = None,
             file_date_format: Optional[str] = None,
+            force_new_instance: bool = False
         ) -> None:
         """
         Parameters
@@ -507,7 +538,7 @@ class LoggerHandler(metaclass=Singleton):
         self.console_date_fmt = console_date_format or self.default_date_format
         self.file_date_fmt = file_date_format or self.default_date_format
 
-    def setup(self, component: Optional[str] = None) -> None:
+    def setup(self, namespace: Optional[str] = None) -> None:
         """Set up console and file handlers for the logger."""
         if not self.logging_enabled:
             print("[LoggerHandler] Logging is disabled via environment variable.")
@@ -527,12 +558,10 @@ class LoggerHandler(metaclass=Singleton):
             logging.Formatter(self.console_msg_fmt, datefmt=self.console_date_fmt)
         )
 
-        # self._manage_urllib_logging()
-
         # File handler with NDJSON formatter
         timestamp = time.strftime('%Y%m%d')
         log_file = self.log_dir / "{}{}.log".format(
-            f"{component}_" if component else "",
+            f"{namespace}_" if namespace else "",
             timestamp
         )
         file_handler = RotatingFileHandler(
@@ -604,15 +633,6 @@ class LoggerHandler(metaclass=Singleton):
 
         self.fallback_logger.error("Invalid log level provided.")
         raise ValueError(f"Invalid log level: {level}")
-
-    def _manage_urllib_logging(self) -> None:
-        # Fix logging format to prevent incorrect argument conversion
-        urllib3_logger = logging.getLogger("urllib3")
-        urllib3_logger.setLevel(logging.DEBUG)
-
-        # Ensure logging handlers use correct format
-        for handler in urllib3_logger.handlers:
-            handler.setFormatter(logging.Formatter(self.console_msg_fmt))
 
     def _start_listener(self, listener: QueueListener) -> None:
         """Start the queue listener."""

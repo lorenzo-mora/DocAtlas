@@ -15,13 +15,13 @@ class NDJsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         # Format message with placeholders if present
-        message = record.getMessage()
-        if contains_placeholders(message):
-            try:
-                message = message % record.args
-            except Exception as e:
-                message = f"Message formatting error: {e}"
-        record.msg = message
+        # message = record.getMessage()
+        # if contains_placeholders(message):
+        #     try:
+        #         message = message % record.args
+        #     except Exception as e:
+        #         message = f"Message formatting error: {e}"
+        # record.msg = message
 
         # Create the structured log record
         log_record = self._create_log_record(record)

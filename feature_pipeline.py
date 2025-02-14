@@ -40,7 +40,7 @@ def run():
             "created": str(datetime.datetime.now()),
             "author": AUTHOR
         }
-    )  # ChromaDB Manager
+    )  # ChromaDB Manager for `documents` collction
     mgr.unavailable_uuids = chroma.get_current_ids()
 
     try:
@@ -61,15 +61,13 @@ def run():
 
     if not mgr.docs_info:
         logger.warning(f"There is no file to be analysed")
-        exit(0)
+        return
 
     for file in mgr.docs_info:
         mgr.process_pdf_file(file)
 
     for doc in mgr.docs:
         processor.compute_embedding(file=doc)
-
-    for doc in mgr.docs:
         chroma.add_entry(doc, stricted=True)
         logger.info(f"Document {doc.metadata.id} [{doc.metadata.title}] completed.")
 

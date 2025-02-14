@@ -499,6 +499,9 @@ class LoggerHandler(metaclass=StrictSingleton):
         file_date_format : Optional[str], optional
             The date format for file log messages. Defaults to None,
             using the default format.
+        force_new_instance : bool, optional
+            Whether to force creation of a new LoggerHandler instance.
+            Defaults to False.
 
         Raises
         ------
@@ -560,7 +563,7 @@ class LoggerHandler(metaclass=StrictSingleton):
 
         # File handler with NDJSON formatter
         timestamp = time.strftime('%Y%m%d')
-        log_file = self.log_dir / "{}{}.log".format(
+        log_file = self.log_dir / "{}{}.log.ndjson".format(
             f"{namespace}_" if namespace else "",
             timestamp
         )

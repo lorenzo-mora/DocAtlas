@@ -20,8 +20,9 @@ class ContextualQA:
     answers : List[str]
         List of answers corresponding to the questions.
     """
-    id: str
-    context: str
+    context_id: str
+    completion_id: str
+    # context: str
     questions: List[str]
     answers: List[str]
 
@@ -33,31 +34,33 @@ class ContextualQA:
         if fields have incorrect types.
         """
         missing_fields = [
-            field for field in ["completion_id", "context", "questions", "answers"]
+            field for field in ["context_id", "completion_id", "questions", "answers"]
             if field not in content]
         if missing_fields:
             raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
 
-        if (not isinstance(content["completion_id"], str) or
-            not isinstance(content["context"], str)):
-            raise TypeError("Fields 'completion_id' and 'context' must be strings.")
+        if (not isinstance(content["context_id"], str) or
+            not isinstance(content["completion_id"], str)):
+            raise TypeError(
+                "Fields 'context_id' and 'completion_id' must be strings.")
 
         if (not isinstance(content["questions"], list) or
             not isinstance(content["answers"], list)):
             raise TypeError("Fields 'questions' and 'answers' must be lists.")
 
         return cls(
-            id=content["completion_id"],
-            context=content["context"],
+            context_id=content["context_id"],
+            completion_id=content["completion_id"],
+            # context=content["context"],
             questions=content["questions"],
             answers=content["answers"]
         )
 
     def __str__(self):
-        return f'Completion {self.id}'
+        return f'Completion {self.context_id}'
 
     def __repr__(self):
-        return f'{self.id}: \"{self.questions}\" [\"{self.answers}\"]'
+        return f'{self.context_id}: \"{self.questions}\" [\"{self.answers}\"]'
 
 class TextChunk:
     """Represents a chunk of text with associated metadata and methods

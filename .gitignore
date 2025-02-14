@@ -173,6 +173,7 @@ cython_debug/
 
 # Custom exception
 data/
-test.ipynb
+test*[.ipynb, .py]
 .qodo/
 .vscode/
+.chroma*/

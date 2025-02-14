@@ -382,7 +382,10 @@ class TextProcessor:
                     if chunk.processed_content:
                         try:
                             chunk.embedding = self.embedder_model.encode(
-                                chunk.processed_content, convert_to_tensor=True).tolist()
+                                sentences=chunk.processed_content,
+                                convert_to_tensor=True,
+                                show_progress_bar=False
+                            ).tolist()
                         except Exception as e:
                             logger.warning(
                                 f"Error in the generation of the embedding: {e}")

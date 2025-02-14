@@ -3,21 +3,35 @@ import json_repair
 from openai.types.chat.chat_completion import ChatCompletion
 
 from ai_tools import LLMManager
-import config.logging
 from config.training import PROMPT_FILE_PATH
 from indexing.components import ContextualQA
-from logger.setup import LoggerManager
+from logger.setup import LoggerHandler
 from storage_utils.yaml_handler import YAMLManager
 
 
-logger_manager = LoggerManager(
-    module_name=__name__,
-    project_name=config.logging.PROJECT_NAME
-)
-logger_manager.setup_logger()
+logger = LoggerHandler().get_logger(__name__)
 
+class ContextualizedQuestionGenerator:
+    """A class to generate, using a language model, questions based
+    on a given context and predefined prompts.
 
-class ContextualizedQuestionsGenerator:
+    Attributes
+    ----------
+    ROLE_DEVELOPER : str
+        Constant representing the developer role.
+    ROLE_USER : str
+        Constant representing the user role.
+    llm_manager : LLMManager
+        An instance of LLMManager to handle language model interactions.
+    prompts : Dict[str, Any]
+        A dictionary containing predefined prompts loaded from a YAML
+        file.
+
+    Methods
+    -------
+    `generate(prompt_context: str, context_id: str)` -> Optional[ContextualQA]
+        Generate questions based on the provided prompt context.
+    """
 
     ROLE_DEVELOPER = "developer"
     ROLE_USER = "user"
@@ -26,46 +40,10 @@ class ContextualizedQuestionsGenerator:
         self.llm_manager = LLMManager()
         self.prompts = YAMLManager.read(PROMPT_FILE_PATH)
 
-    def contextualize_prompt(self, context: str) -> str:
-        """Construct a question prompt by combining the provided context
-        with predefined instructions for question generation.
-
-        Parameters
-        ----------
-        context : str
-            The context to be included in the question prompt.
-
-        Returns
-        -------
-        str
-            A formatted string containing the context and question
-            instructions.
-
-        Raises
-        ------
-        ValueError
-            If the context is empty or None.
-        KeyError
-            If the question generation instructions are not found in the
-            prompts.
-        """
-        if not context:
-            logger_manager.log_message("Context is empty or None.", "ERROR")
-            raise ValueError("Context cannot be empty or None.")
-
-        instruction: Optional[str] = self.prompts.get('user_contextual_qa')
-
-        if not instruction:
-            logger_manager.log_message(
-                "Unable to retrieve text for the prompt instructions.", "ERROR")
-            raise KeyError("Prompt instruction `question_generation` not found in YAML file.")
-
-        return f"\nContext: {context}\nQuestion: {instruction}"
-
     def generate(
             self,
             prompt_context: str,
-            context_id: str
+            context_id: str,
         ) -> Optional[ContextualQA]:
         """Generate questions based on the provided prompt context.
 
@@ -88,8 +66,7 @@ class ContextualizedQuestionsGenerator:
             If the prompt context is empty or invalid.
         """
         if not prompt_context:
-            logger_manager.log_message(
-                "Prompt context is empty or invalid.", "ERROR")
+            logger.error("Prompt context is empty or invalid.")
             raise ValueError("Prompt context cannot be empty.")
 
         messages = self._build_messages(prompt_context)
@@ -97,8 +74,7 @@ class ContextualizedQuestionsGenerator:
             completion = self.llm_manager.call_api(messages)
             return self._process_response(completion, context_id)
         except Exception as e:
-            logger_manager.log_message(
-                f"Unable to complete current completion: {e}", "ERROR")
+            logger.error(f"Unable to complete current completion: {e}")
             raise
 
     def _build_messages(self, prompt_context: str) -> List[Dict[str, Any]]:
@@ -123,16 +99,14 @@ class ContextualizedQuestionsGenerator:
         dev_prompt = self.prompts.get('developer_contextual_qa')
         dev_msg = None
         if dev_prompt is None:
-            logger_manager.log_message(
-                "Developer prompt not found in YAML file. It is skipped.",
-                "WARNING"
-            )
+            logger.warning(
+                "Developer prompt not found in YAML file. It is skipped.")
         else:
             dev_msg = self._create_message(self.ROLE_DEVELOPER, dev_prompt)
 
-        usr_prompt = self.contextualize_prompt(context=prompt_context)
+        usr_prompt = self._contextualize_prompt(context=prompt_context)
         if usr_prompt is None:
-            logger_manager.log_message("User prompt could not be contextualized.", "ERROR")
+            logger.error("User prompt could not be contextualized.")
             raise ValueError("User prompt could not be contextualized.")
         usr_msg = self._create_message(self.ROLE_USER, usr_prompt)
 
@@ -167,11 +141,11 @@ class ContextualizedQuestionsGenerator:
         """
         try:
             if role not in (self.ROLE_DEVELOPER, self.ROLE_USER):
-                logger_manager.log_message(f"Invalid role: {role}", "ERROR")
+                logger.error(f"Invalid role: {role}")
                 raise ValueError("Invalid role provided.")
 
             if not isinstance(text, str) or not text.strip():
-                logger_manager.log_message("Invalid text content.", "ERROR")
+                logger.error("Invalid text content.")
                 raise ValueError("Text content must be a non-empty string.")
 
             return {
@@ -184,17 +158,69 @@ class ContextualizedQuestionsGenerator:
                 ]
             }
         except ValueError as e:
-            logger_manager.log_message(f"Error creating message: {e}", "ERROR")
+            logger.error(f"Error creating message: {e}")
             raise
+
+    def _contextualize_prompt(self, context: str) -> str:
+        """Construct a question prompt by combining the provided context
+        with predefined instructions for question generation.
+
+        Parameters
+        ----------
+        context : str
+            The context to be included in the question prompt.
+
+        Returns
+        -------
+        str
+            A formatted string containing the context and question
+            instructions.
+
+        Raises
+        ------
+        ValueError
+            If the context is empty or None.
+        KeyError
+            If the question generation instructions are not found in the
+            prompts.
+        """
+        if not context:
+            logger.error("Context is empty or None.")
+            raise ValueError("Context cannot be empty or None.")
+
+        instruction: Optional[str] = self.prompts.get('user_contextual_qa')
+
+        if not instruction:
+            logger.error("Unable to retrieve text for the prompt instructions.")
+            raise KeyError("Prompt instruction `question_generation` not found in YAML file.")
+
+        return f"\nContext: {context}\nQuestion: {instruction}"
 
     def _process_response(
             self,
             completion: ChatCompletion,
-            prompt_context: str
+            context_id: str
         ) -> Optional[ContextualQA]:
+        """Process the response from a chat completion and convert it
+        into a ContextualQA object.
+
+        Parameters
+        ----------
+        completion : ChatCompletion
+            The chat completion object containing the response to
+            process.
+        context_id : str
+            The identifier of the context associated with the prompt.
+
+        Returns
+        -------
+        Optional[ContextualQA]
+            A ContextualQA object created from the processed response,
+            or None if no valid response could be generated.
+        """
         response = completion.choices[0].message.content
         if not response:
-            logger_manager.log_message("No response could be generated.", "ERROR")
+            logger.error("No response could be generated.")
             return
 
         repaired_response = json_repair.repair_json(response, return_objects=True)
@@ -203,6 +229,7 @@ class ContextualizedQuestionsGenerator:
 
         context_response: Dict[str, Any] = {
             **repaired_response, # type: ignore
-            'contextId': prompt_context
+            'context_id': context_id,
+            'completion_id': completion.id
         }
         return ContextualQA.from_dict(context_response)

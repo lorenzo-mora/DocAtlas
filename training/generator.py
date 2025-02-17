@@ -4,23 +4,19 @@ from openai.types.chat.chat_completion import ChatCompletion
 
 from ai_tools import LLMManager
 from config.training import PROMPT_FILE_PATH
-from indexing.components import ContextualQA
+from text.components import ContextualQA
 from logger.setup import LoggerHandler
 from storage_utils.yaml_handler import YAMLManager
 
 
 logger = LoggerHandler().get_logger(__name__)
 
-class ContextualizedQuestionGenerator:
-    """A class to generate, using a language model, questions based
-    on a given context and predefined prompts.
+class ContextualQuestionResponseGenerator:
+    """A class to generate, using a language model, questions and
+    related answers, based on a given context and predefined prompts.
 
     Attributes
     ----------
-    ROLE_DEVELOPER : str
-        Constant representing the developer role.
-    ROLE_USER : str
-        Constant representing the user role.
     llm_manager : LLMManager
         An instance of LLMManager to handle language model interactions.
     prompts : Dict[str, Any]
@@ -33,9 +29,6 @@ class ContextualizedQuestionGenerator:
         Generate questions based on the provided prompt context.
     """
 
-    ROLE_DEVELOPER = "developer"
-    ROLE_USER = "user"
-
     def __init__(self) -> None:
         self.llm_manager = LLMManager()
         self.prompts = YAMLManager.read(PROMPT_FILE_PATH)
@@ -45,7 +38,8 @@ class ContextualizedQuestionGenerator:
             prompt_context: str,
             context_id: str,
         ) -> Optional[ContextualQA]:
-        """Generate questions based on the provided prompt context.
+        """Generate questions and their answers based on the provided
+        prompt context.
 
         Parameters
         ----------
@@ -102,13 +96,13 @@ class ContextualizedQuestionGenerator:
             logger.warning(
                 "Developer prompt not found in YAML file. It is skipped.")
         else:
-            dev_msg = self._create_message(self.ROLE_DEVELOPER, dev_prompt)
+            dev_msg = self._create_message("developer", dev_prompt)
 
         usr_prompt = self._contextualize_prompt(context=prompt_context)
         if usr_prompt is None:
             logger.error("User prompt could not be contextualized.")
             raise ValueError("User prompt could not be contextualized.")
-        usr_msg = self._create_message(self.ROLE_USER, usr_prompt)
+        usr_msg = self._create_message("user", usr_prompt)
 
         return [msg for msg in [dev_msg, usr_msg] if msg is not None]
 
@@ -140,7 +134,7 @@ class ContextualizedQuestionGenerator:
             string.
         """
         try:
-            if role not in (self.ROLE_DEVELOPER, self.ROLE_USER):
+            if role not in ("developer", "user"):
                 logger.error(f"Invalid role: {role}")
                 raise ValueError("Invalid role provided.")
 

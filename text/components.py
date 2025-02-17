@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import pymupdf
 
@@ -76,6 +76,9 @@ class TextChunk:
         The processed version of the text content.
     embedding : List[float]
         A list representing the embedding of the text content.
+    coordinates : List[int | float]
+        A list representing the coordinates of the bounding box of the
+        text within the original document, in the format `x0, y0, x1, y1`.
 
     Methods
     -------
@@ -85,9 +88,14 @@ class TextChunk:
     processed_content: str = ""
     embedding: List[float] = []
 
-    def __init__(self, id: str, content: str) -> None:
+    def __init__(
+            self, id: str,
+            content: str,
+            coordinates: Optional[List[Union[int, float]]] = None
+        ) -> None:
         self.id = id
         self.raw_content = content
+        self.coord = coordinates
 
     def serialize_content(
             self,
@@ -177,13 +185,27 @@ class Page:
         w, h = self.content.artbox.bottom_right
 
         boundaries = self.calculate_boundaries(w, h)
+        content_text = self.content.get_textpage(clip=boundaries)
+        page_content: List[
+            Tuple[
+                Union[int, float],
+                Union[int, float],
+                Union[int, float],
+                Union[int, float],
+                str,
+                int,
+                Literal[0, 1]
+            ]
+        ] = self.content.get_text(option="blocks", textpage=content_text) # type: ignore
+
         chunks: List[TextChunk] = []
-        for i, block in enumerate(self.content.get_text(option="blocks", clip=boundaries)): # type: ignore
-            if block[4].strip():
-                # fmt_num = format_index_with_padding(i, len(str(len(self))))
+        for block in page_content:
+            x0, y0, x1, y1, text, block_i, block_type = block
+            if text.strip():
                 chunks.append(TextChunk(
-                    id=f"{self.number}_{i}",
-                    content=block[4]
+                    id=f"{self.number}_{block_i}",
+                    content=text,
+                    coordinates=[x0, y0, x1, y1]
                 ))
         return chunks
 

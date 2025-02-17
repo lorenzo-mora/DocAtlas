@@ -3,13 +3,14 @@ from pathlib import Path
 
 from config import schema
 from config.chroma import AUTHOR
-import config.file_management
 import config.logging
+from config.file_management import PDF_SOURCE_FOLDER, source_path
 from config.validation import ConfigurationError, validate_config
-from indexing.text_processor import TextProcessor
+from storage_utils.upload import Uploader
+from text.extraction import TextExtractor
+from text.processing import TextProcessor
 from logger.setup import LoggerHandler
 from storage_utils.db_hanler import DocumentCollectionHandler
-from storage_utils.pdf_handler import PDFHandler
 
 
 log_handler = LoggerHandler(
@@ -29,7 +30,8 @@ logger = log_handler.get_logger("feature_pipeline")
 def run():
     logger.info(f"{chr(0x2699)} The document indexing pipeline is executed.")
 
-    mgr = PDFHandler()  # PDF file manager
+    file_manager = Uploader(folder_path=PDF_SOURCE_FOLDER)  # PDF file uploader
+    content_extractor = TextExtractor(folder_path=PDF_SOURCE_FOLDER)
     processor = TextProcessor()  # Document textual content processor
     chroma = DocumentCollectionHandler(
         metadata={
@@ -41,32 +43,32 @@ def run():
             "author": AUTHOR
         }
     )  # ChromaDB Manager for `documents` collction
-    mgr.unavailable_uuids = chroma.get_current_ids()
+    file_manager.unavailable_uuids = chroma.get_current_ids()
 
     try:
-        if Path(config.file_management.source_path).is_dir():
+        if Path(source_path).is_dir():
             logger.info(
                 "Specified path points to a folder. The entire content is downloaded."
             )
-            mgr.get_all_pdf_from_local_folder(config.file_management.source_path)
+            file_manager.get_all_pdf_from_local_folder(source_path)
         else:
             logger.info("Specified path points to a single file.")
-            mgr.get_pdf_from_local(config.file_management.source_path, force=False)
+            file_manager.get_pdf_from_local(source_path, force=False)
     except Exception as e:
         logger.error(
-            f"Error retrieving file `{config.file_management.source_path}`: {e}",
+            f"Error retrieving file `{source_path}`: {e}",
             exc_info=True
         )
         raise
 
-    if not mgr.docs_info:
+    if not file_manager.docs_info:
         logger.warning(f"There is no file to be analysed")
         return
 
-    for file in mgr.docs_info:
-        mgr.process_pdf_file(file)
+    for file in file_manager.docs_info:
+        content_extractor.process_pdf_file(file)
 
-    for doc in mgr.docs:
+    for doc in content_extractor.docs:
         processor.compute_embedding(file=doc)
         chroma.add_entry(doc, stricted=True)
         logger.info(f"Document {doc.metadata.id} [{doc.metadata.title}] completed.")

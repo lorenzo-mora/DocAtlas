@@ -2,34 +2,33 @@ from pathlib import Path
 import shutil
 from typing import List, Optional, Set, Tuple, Union
 
-import fitz
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
-import pymupdf
 
-from config.file_management import PDF_SOURCE_FOLDER, OVERWRITE_IF_EXISTS, UNIQUE_IF_EXISTS
-from text.components import DocInfo, Document, Page
-from text.utils import UUIDManager
+from config.file_management import (
+    OVERWRITE_IF_EXISTS, PDF_SOURCE_FOLDER, UNIQUE_IF_EXISTS)
 from logger.setup import LoggerHandler
+from text.components import DocInfo
+from text.utils import UUIDManager
 
 
 logger = LoggerHandler().get_logger(__name__)
 
-class PDFHandler:
+class Uploader:
 
     docs_info: List[DocInfo]
-    docs: List[Document]
     _unavbl_uuids: Set[str]
 
     def __init__(
             self,
-            folder_path: Union[str, Path] = PDF_SOURCE_FOLDER
+            folder_path: Union[str, Path]
         ) -> None:
+        assert isinstance(folder_path, (str, Path)), "The `folder_path` must be a string or a Path"
+
         self.source_folder_path = self._validate_data_source_folder(folder_path)
 
         self._unavbl_uuids = set()
         self.docs_info = []
-        self.docs = []
 
         logger.debug(
             f"Successfully initialised the {self.__class__.__name__} instance."
@@ -233,55 +232,6 @@ class PDFHandler:
             (f"Successfully retrieved the content of folder `{folder_path}`: "
              f"{len(compatible_files)} new file(s) detected."))
         return compatible_files
-
-    def process_pdf_file(
-            self,
-            file_info: DocInfo
-        ) -> None:
-        """Process a PDF file by opening it, extracting its pages, and
-        appending the document to the internal list of documents.
-
-
-        Parameters
-        ----------
-        file_info : DocInfo
-            Information about the file to be processed, including its
-            title and ID.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the specified PDF file is not found in the source folder.
-        fitz.FileDataError
-            If the PDF file is corrupted and cannot be opened.
-        Exception
-            For any unexpected errors during the processing of the PDF
-            file.
-        """
-        if file_info.title.split('.')[-1].casefold() != 'pdf':
-            logger.error(
-                f"File `{file_info.title}` is not a PDF; processing skipped.")
-            return
-
-        logger.debug(f"File name: {file_info.title}, id: {file_info.id}")
-
-        pdf_path = self.source_folder_path.joinpath(file_info.title)
-        try:
-            doc = pymupdf.open(pdf_path)
-            logger.debug(f"Number of pages: {len(doc)}")
-
-            pages = [
-                Page(i, content=page)
-                for i, page in enumerate(doc) # type: ignore
-            ]
-
-            self.docs.append(Document(pages, info=file_info))
-        except FileNotFoundError:
-            logger.error(f"File not found: {pdf_path}")
-        except fitz.FileDataError:
-            logger.error(f"Corrupted PDF file: {pdf_path}")
-        except Exception as e:
-            logger.error(f"Unexpected error processing file `{pdf_path}`: {e}")
 
     def _validate_data_source_folder(self, path: Union[str, Path]) -> Path:
         path = Path(path)

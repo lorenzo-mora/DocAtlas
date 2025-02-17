@@ -20,3 +20,16 @@ user_contextual_qa: |
   DO NOT include any additional information or characters outside the specified JSON format. 
   The response must consist only of the requested JSON structure. 
   If the generated content does not meet the specified format, please make the necessary adjustments to ensure compliance.
+
+assistant_contextual_qa: |
+  [INST]
+  Instruction: You are an AI assistant specialized in regulatory documents.
+  Your role is to provide accurate and informative answers based on the given context.
+  [/INST]
+
+  ### CONTEXT:
+
+  {context}
+
+  ### QUESTION:
+  [INST]{question}[/INST]

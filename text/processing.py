@@ -16,7 +16,7 @@ from textblob import TextBlob
 
 from config.embedding import FIXED_EMBEDDING_LENGTH, MODEL_SENTENCE_TRANSFORMER
 from config.processing_text import INSTALL_MISSING_NLTK, MIN_CHUNK_LENGTH, STEPS
-from indexing.components import Document
+from text.components import Document
 from logger.helper import timed_block
 from logger.setup import LoggerHandler
 

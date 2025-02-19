@@ -62,9 +62,86 @@ class ContextualQA:
     def __repr__(self):
         return f'{self.context_id}: \"{self.questions}\" [\"{self.answers}\"]'
 
-class TextChunk:
-    """Represents a chunk of text with associated metadata and methods
+@dataclass
+class BoundingBox:
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    x0_norm: Optional[float] = None
+    y0_norm: Optional[float] = None
+    x1_norm: Optional[float] = None
+    y1_norm: Optional[float] = None
+
+    def update(
+            self,
+            x0: Optional[float],
+            y0: Optional[float],
+            x1: Optional[float],
+            y1: Optional[float]
+        ) -> None:
+        """Update the bounding box coordinates to encompass the given coordinates.
+
+        Adjusts the current bounding box by expanding its boundaries to
+        include the specified coordinates (x0, y0, x1, y1). If a new
+        coordinate is provided, the minimum and maximum values are
+        recalculated to ensure the bounding box covers the new area.
+
+        Parameters
+        ----------
+        x0 : float, optional
+            The x-coordinate of the top-left corner.
+        y0 : float, optional
+            The y-coordinate of the top-left corner.
+        x1 : float, optional
+            The x-coordinate of the bottom-right corner.
+        y1 : float, optional
+            The y-coordinate of the bottom-right corner.
+        """
+        self.x0 = min(self.x0, x0) if x0 else self.x0
+        self.y0 = min(self.y0, y0) if y0 else self.y0
+        self.x1 = max(self.x1, x1) if x1 else self.x1
+        self.y1 = max(self.y1, y1) if y1 else self.y1
+
+    def normalize(
+            self,
+            width: float,
+            height: float
+        ) -> None:
+        """Normalize the bounding box coordinates based on the given width and height.
+
+        Parameters
+        ----------
+        width : float
+            The width to normalize the x-coordinates.
+        height : float
+            The height to normalize the y-coordinates.
+
+        Raises
+        ------
+        ZeroDivisionError
+            If `width` or `height` is zero.
+        """
+        self.x0_norm, self.y0_norm, self.x1_norm, self.y1_norm = (
+            self.x0 / width,
+            self.y0 / height,
+            self.x1 / width,
+            self.y1 / height
+        )
+
+class TextBlock:
+    """Represents a block of text with associated metadata and methods
     for serialization and representation.
+
+    Parameters
+    ----------
+    id : str
+        Unique identifier for the text block.
+    content : str
+        The original text content.
+    coordinates : Optional[List[Union[int, float]]], optional
+        A list representing the coordinates of the bounding box of the
+        text within the original document, in the format `x0, y0, x1, y1`.
 
     Attributes
     ----------
@@ -73,25 +150,28 @@ class TextChunk:
     raw_content : str
         The original text content.
     processed_content : str
-        The processed version of the text content.
+        Processed version of the text content.
+    summarized_content : str
+        Summarized version of the text content.
     embedding : List[float]
-        A list representing the embedding of the text content.
+        List representing the embedding of the text content.
     coordinates : List[int | float]
-        A list representing the coordinates of the bounding box of the
-        text within the original document, in the format `x0, y0, x1, y1`.
+        Coordinates of the text block's bounding box in the document.
 
     Methods
     -------
     `serialize_content(raw=False, processed=False, embedding=False)` -> Dict[str, Any]
-        Retrieve specified content from the TextChunk instance."""
-
+        Retrieve specified content from the TextBlock instance.
+    """
     processed_content: str = ""
+    summarized_content: str = ""
     embedding: List[float] = []
 
     def __init__(
-            self, id: str,
+            self,
+            id: str,
             content: str,
-            coordinates: Optional[List[Union[int, float]]] = None
+            coordinates: Optional[BoundingBox] = None
         ) -> None:
         self.id = id
         self.raw_content = content
@@ -101,9 +181,10 @@ class TextChunk:
             self,
             raw: bool = False,
             processed: bool = False,
+            summarized: bool = False,
             embedding: bool = False
         ) -> Dict[str, Any]:
-        """Retrieve specified content from the TextChunk instance.
+        """Retrieve specified content from the TextBlock instance.
 
         Parameters
         ----------
@@ -112,6 +193,9 @@ class TextChunk:
         processed : bool, optional
             If True, include processed content in the output. By default
             False.
+        summarized : bool, optional
+            If True, include summarized content in the output. By
+            default False.
         embedding : bool, optional
             If True, include the embedding of the content in the output.
             By default False.
@@ -120,12 +204,14 @@ class TextChunk:
         -------
         Dict[str, Any]
             A dictionary containing the requested content types
-            with keys 'raw', 'processed', and 'embedding'. Each key maps
-            to the corresponding content or None if not requested.
+            with keys 'raw', 'processed', 'summarized', and 'embedding'.
+            Each key maps to the corresponding content or None if not
+            requested.
         """
         return {
             "raw": self.raw_content if raw else None,
             "processed": self.processed_content if processed else None,
+            "summarized": self.summarized_content if summarized else None,
             "embedding": self.embedding if embedding else None
         }
 
@@ -137,8 +223,12 @@ class TextChunk:
 
     def __repr__(self):
         attributes = [
-            attr for attr in ["raw_content", "processed_content", "embedding"]
-            if getattr(self, attr, None)
+            attr for attr in [
+                "raw_content",
+                "processed_content",
+                "summarized_content",
+                "embedding"
+            ] if getattr(self, attr, None)
         ]
 
         formatted_attrs = " and ".join(
@@ -146,46 +236,105 @@ class TextChunk:
         ) or "none"
 
         return f"{self.__class__} at {hex(id(self))} with attributes {formatted_attrs} valued"
-        
 
 class Page:
-    """It represents a page of a document and collects blocks of text
+    """Represents a page of a document and collects blocks of text
     within the specified boundaries.
+
+    Parameters
+    ----------
+    number : int
+        The page number.
+    content : pymupdf.Page
+        The page content, expected to have an `artbox` attribute and
+        a `get_text` method.
+    normalize : bool, optional
+        If True, normalize the bounding box coordinates relative to
+        the page dimensions. By default False.
 
     Attributes
     ----------
     number : int
-        The page number.
-    content :
-        The content of the page, expected to have an `artbox` attribute
-        and a `get_text` method.
-    chunks : list of str
-        A list of text blocks extracted from the page content within the
+        Page number in the document.
+    source_page_object : pymupdf.Page
+        Original page object from which content is extracted.
+    chunks : list of TextBlock
+        List of text blocks extracted from the page content within the
         defined boundaries.
-    processed_text : list of string
-        The list of paragraphs extracted from the page and elaborated.
+    full_text : TextBlock
+        Single text block representing the entire page content within
+        specified boundaries.
+
+    Methods
+    -------
+    extract_paragraphs(normalize_coordinates=False) -> List[TextBlock]
+        Extracts paragraphs from the page content within calculated
+        boundaries.
+    extract_bounded_text(normalize_coordinates=False) -> TextBlock
+        Extracts text content and its bounding box from the page within
+        specified boundaries.
+    calculate_boundaries(width, height) -> Tuple[float, float, float, float]
+        Calculate the boundaries of the text area on the page.
+    get_serialized_content(raw_chunks=False, processed_chunks=False, embedded_chunks=False, flatten=True, exclude_empty=False) -> Dict[str, Any]
+        Retrieves serialized content from the page's text chunks based on
+        specified chunk types.
     """
-    processed_text: List[str] = []
-
-    def __init__(self, number: int, content: pymupdf.Page) -> None:
+    def __init__(
+            self,
+            number: int,
+            page_object: pymupdf.Page,
+            normalize: bool = False
+        ) -> None:
         self.number = number
-        self.content = content
-        self.chunks = self.extract_paragraphs()
+        self.source_page_object = page_object
+        self.chunks = self.extract_paragraphs(normalize)
+        self.full_text = self.extract_bounded_text(normalize)
 
-    def extract_paragraphs(self) -> List[TextChunk]:
+    @property
+    def width(self) -> float:
+        """Width of the page's artbox."""
+        if not hasattr(self, "_artbox_width"):
+            if (hasattr(self.source_page_object, 'artbox') and
+                hasattr(self.source_page_object.artbox, 'bottom_right')):
+                self._artbox_width = self.source_page_object.artbox.bottom_right[0]
+            else:
+                raise AttributeError(
+                    "`source_page_object` or its attributes are not properly initialized.")
+        return self._artbox_width
+
+    @property
+    def height(self) -> float:
+        """Height of the page's artbox."""
+        if not hasattr(self, "_artbox_height"):
+            if (hasattr(self.source_page_object, 'artbox') and
+                hasattr(self.source_page_object.artbox, 'bottom_right')):
+                self._artbox_height = self.source_page_object.artbox.bottom_right[1]
+            else:
+                raise AttributeError(
+                    "`source_page_object` or its attributes are not properly initialized.")
+        return self._artbox_height
+
+    def extract_paragraphs(
+            self,
+            normalize_coordinates: bool = False
+        ) -> List[TextBlock]:
         """Extracts paragraphs from the page content within calculated
         boundaries.
 
+        Parameters
+        ----------
+        normalize_coordinates : bool, optional
+            If True, normalize the bounding box coordinates relative to
+            the page dimensions. By default False.
+
         Returns
         -------
-        list of str
+        list of TextBlock
             A list of non-empty text blocks extracted from the page
             content.
         """
-        w, h = self.content.artbox.bottom_right
-
-        boundaries = self.calculate_boundaries(w, h)
-        content_text = self.content.get_textpage(clip=boundaries)
+        boundaries = self.calculate_boundaries(self.width, self.height)
+        content_text = self.source_page_object.get_textpage(clip=boundaries)
         page_content: List[
             Tuple[
                 Union[int, float],
@@ -196,21 +345,92 @@ class Page:
                 int,
                 Literal[0, 1]
             ]
-        ] = self.content.get_text(option="blocks", textpage=content_text) # type: ignore
+        ] = self.source_page_object.get_text( # type: ignore
+            option="blocks", textpage=content_text)
 
-        chunks: List[TextChunk] = []
+        blocks: List[TextBlock] = []
+        bbox = BoundingBox(
+            float('inf'), float('inf'), -float('inf'), -float('inf'))
         for block in page_content:
             x0, y0, x1, y1, text, block_i, block_type = block
-            if text.strip():
-                chunks.append(TextChunk(
+
+            if text.strip():  # Ignore empty blocks
+
+                bbox.update(x0, y0, x1, y1)
+                if normalize_coordinates:
+                    # Normalize the bounding box coordinates
+                    bbox.normalize(width=self.width, height=self.height)
+
+                blocks.append(TextBlock(
                     id=f"{self.number}_{block_i}",
                     content=text,
-                    coordinates=[x0, y0, x1, y1]
+                    coordinates=bbox
                 ))
-        return chunks
+        return blocks
 
-    def calculate_boundaries(
+    def extract_bounded_text(
             self,
+            normalize_coordinates: bool = False
+        ) -> TextBlock:
+        """Extracts text content and its bounding box from the page within
+        specified boundaries.
+
+        Parameters
+        ----------
+        normalize_coordinates : bool, optional
+            If True, normalize the bounding box coordinates relative to
+            the page dimensions. By default False.
+
+        Returns
+        -------
+        TextBlock
+            A TextBlock instance containing the concatenated extracted
+            text and the smallest bounding box enclosing all extracted
+            text blocks. If no text is extracted, the bounding box is
+            None.
+
+        Notes
+        -----
+        The extracted text is fully or partially inside the calculated
+        boundaries.
+        """
+        # Compute the clipping boundaries
+        x_min, y_min, x_max, y_max = self.calculate_boundaries(self.width, self.height)
+
+        # Extract all text blocks from the page
+        content_text = self.source_page_object.get_textpage()
+        page_content = self.source_page_object.get_text(  # type: ignore
+            option="blocks", textpage=content_text)
+
+        # Sort text blocks for logical reading order (top-to-bottom, left-to-right)
+        page_content = sorted(page_content, key=lambda b: (b[1], b[0]))
+
+        extracted_texts: List[str] = []
+        merged_bbox = BoundingBox(
+            float('inf'), float('inf'), -float('inf'), -float('inf'))
+        for block in page_content:
+            x0, y0, x1, y1, text, _, _ = block  # Extract block bounding box
+
+            if text.strip():  # Ignore empty blocks
+                # Check if the block is fully inside or intersects the rectangle
+                if not (x1 < x_min or x0 > x_max or y1 < y_min or y0 > y_max):
+                    extracted_texts.append(text)
+
+                    # Update the overall bounding box
+                    merged_bbox.update(x0, y0, x1, y1)
+
+        if extracted_texts and normalize_coordinates:
+            # Normalize the bounding box coordinates
+            merged_bbox.normalize(width=self.width, height=self.height)
+
+        return TextBlock(
+            id=f"{self.number}_bounded",
+            content="\n".join(extracted_texts).strip(),
+            coordinates=merged_bbox if extracted_texts else None
+        )
+
+    @staticmethod
+    def calculate_boundaries(
             width: float,
             height: float
         ) -> Tuple[float, float, float, float]:
@@ -302,7 +522,7 @@ class Page:
         return f'{"| ".join(str(chk) for chk in self.chunks)}'
 
     def __repr__(self):
-        return str(self.content)
+        return str(self.source_page_object)
 
 @dataclass
 class DocInfo:
@@ -412,7 +632,7 @@ class Document:
             If True, includes the embeddings of the content of each page
             in the serialization. By default False.
         keep_structure : bool, optional
-            If True, keeps the `Document.Page.TextChunk` structure
+            If True, keeps the `Document.Page.TextBlock` structure
             in the serialization, otherwise flattens the content by
             excluding the page level (information retrievable directly
             from the chunk itself). By default False.
@@ -428,7 +648,7 @@ class Document:
         """
         content_pages: Dict[str, Any] = {}
         if keep_structure:
-            # Maintain the structure Document.Page.TextChunk
+            # Maintain the structure Document.Page.TextBlock
             id_length = len(str(self.__len__()))
             for i, page in enumerate(self.pages):
                 current_content = page.get_serialized_content(

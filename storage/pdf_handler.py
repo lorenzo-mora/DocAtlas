@@ -271,7 +271,7 @@ class PDFHandler:
             logger.debug(f"Number of pages: {len(doc)}")
 
             pages = [
-                Page(i, content=page)
+                Page(i, page_object=page)
                 for i, page in enumerate(doc) # type: ignore
             ]
 

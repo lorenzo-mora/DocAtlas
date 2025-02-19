@@ -35,6 +35,7 @@ class NDJsonFormatter(logging.Formatter):
                 'ts': self.formatTime(record, self.datefmt),
                 'lvl': record.levelname,
                 'msg': "Log serialization error",
+                'mod': record.name,
                 'stack_trace': str(e),
             }
             return json.dumps(fallback_record, ensure_ascii=False)
@@ -44,7 +45,7 @@ class NDJsonFormatter(logging.Formatter):
             'ts': self.formatTime(record, self.datefmt),
             'lvl': record.levelname,
             'msg': record.getMessage(),
-            'mod': record.module,
+            'mod': record.name,
             'fn_name': record.funcName,
             'line_no': record.lineno,
             'path_name': record.pathname,

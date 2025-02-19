@@ -5,7 +5,7 @@ import config.logging
 from config.training import MODEL
 from logger.helper import timed_block
 from logger.setup import LoggerHandler
-from storage_utils.db_hanler import (
+from storage.db_hanler import (
     ContextualQuestionHandler,
     DocumentCollectionHandler,
     ContextualResponseHandler

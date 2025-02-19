@@ -6,7 +6,7 @@ from ai_tools import LLMManager
 from config.training import PROMPT_FILE_PATH
 from text.components import ContextualQA
 from logger.setup import LoggerHandler
-from storage_utils.yaml_handler import YAMLManager
+from storage.yaml_handler import YAMLManager
 
 
 logger = LoggerHandler().get_logger(__name__)

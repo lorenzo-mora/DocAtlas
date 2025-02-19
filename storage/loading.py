@@ -5,8 +5,7 @@ from typing import List, Optional, Set, Tuple, Union
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 
-from config.file_management import (
-    OVERWRITE_IF_EXISTS, PDF_SOURCE_FOLDER, UNIQUE_IF_EXISTS)
+from config.file_management import OVERWRITE_IF_EXISTS, UNIQUE_IF_EXISTS
 from logger.setup import LoggerHandler
 from text.components import DocInfo
 from text.utils import UUIDManager

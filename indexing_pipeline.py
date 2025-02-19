@@ -6,11 +6,11 @@ from config.chroma import AUTHOR
 import config.logging
 from config.file_management import PDF_SOURCE_FOLDER, source_path
 from config.validation import ConfigurationError, validate_config
-from storage_utils.upload import Uploader
+from storage.loading import Uploader
 from text.extraction import TextExtractor
 from text.processing import TextProcessor
 from logger.setup import LoggerHandler
-from storage_utils.db_hanler import DocumentCollectionHandler
+from storage.db_hanler import DocumentCollectionHandler
 
 
 log_handler = LoggerHandler(
@@ -31,7 +31,7 @@ def run():
     logger.info(f"{chr(0x2699)} The document indexing pipeline is executed.")
 
     file_manager = Uploader(folder_path=PDF_SOURCE_FOLDER)  # PDF file uploader
-    content_extractor = TextExtractor(folder_path=PDF_SOURCE_FOLDER)
+    content_extractor = TextExtractor(folder_path=PDF_SOURCE_FOLDER)  # PDF file extractor
     processor = TextProcessor()  # Document textual content processor
     chroma = DocumentCollectionHandler(
         metadata={

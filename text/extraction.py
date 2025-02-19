@@ -4,7 +4,6 @@ from typing import List, Union
 import fitz
 import pymupdf
 
-from config.file_management import PDF_SOURCE_FOLDER
 from logger.setup import LoggerHandler
 from text.components import DocInfo, Document, Page
 
@@ -65,11 +64,12 @@ class TextExtractor:
             logger.debug(f"Number of pages: {doc.page_count}")
 
             pages = [
-                Page(page_number, content=page)
+                Page(page_number, page_object=page)
                 for page_number, page in enumerate(doc) # type: ignore
             ]
 
             self.docs.append(Document(pages, info=file_info))
+            # doc.close()
         except FileNotFoundError:
             logger.error(f"File not found: {pdf_path}")
         except fitz.FileDataError:

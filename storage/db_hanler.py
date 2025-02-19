@@ -32,6 +32,8 @@ ENVIRONMENT = os.environ.get('ENV', "DEV")
 
 class CollectionName(str, enum.Enum):
     documents = "documents"
+    full = "full_summaries"
+    chunks = "chunk_summaries"
     questions = "contextual_questions"
     answers = "generated_answers"
 
@@ -73,6 +75,17 @@ class BaseDBHandler(ABC):
 class ChromaHandler(BaseDBHandler):
     """Handler class for managing collections in a Chroma database.
 
+    Parameters
+    ----------
+    collection_name : CollectionName
+        The name of the collection to manage.
+    collection_metadata : Optional[Dict[str, Any]]
+        Metadata associated with the collection.
+    persist_directory : Union[Path, str]
+        Directory path for database persistence.
+    embedder_function : Optional[SentenceTransformerEmbeddingFunction], optional
+        Function for embedding documents, by default None.
+
     Attributes
     ----------
     persist_path : str
@@ -86,15 +99,15 @@ class ChromaHandler(BaseDBHandler):
 
     Methods
     -------
-    `setup_db(environment: str)` -> None
+    `setup_db(environment)` -> None
         Configures the database client based on the environment.
     `empty_collection()` -> None
         Deletes the current collection from the database.
     `get_current_ids()` -> List[str]
         Retrieves unique IDs from the collection.
-    `get_content_by_doc(doc_id: str, include: list)` -> chromadb.GetResult
+    `get_content_by_doc(doc_id, include=None)` -> chromadb.GetResult
         Retrieves content for a specific document ID.
-    `walk(chunk_size: int, doc_id: Optional[str], filter_doc: Optional[WhereDocument], include: Optional[List[IncludeEnum]])`
+    `walk(chunk_size=10, doc_id=None, filter_doc=None, include=None)`
         Iterates over the collection in chunks, yielding results.
     """
 
@@ -113,19 +126,7 @@ class ChromaHandler(BaseDBHandler):
         self.persist_path = persist_directory
         self.setup_db(ENVIRONMENT)
 
-        if not isinstance(collection_name, (CollectionName, str)) or (
-            isinstance(collection_name, str) and collection_name.lower() not in CollectionName
-        ) or (
-            isinstance(collection_name, CollectionName) and collection_name not in CollectionName
-        ):
-            logger.error(
-                "The name of the collection may be one of "
-                f"{', '.join(name.value for name in CollectionName)}. "
-                f"Instead, '{collection_name}' is provided."
-            )
-            raise ValueError("Collection name not recognised")
-
-        self.name = collection_name.value if isinstance(collection_name, CollectionName) else collection_name
+        self.name = self._validate_collection(collection_name)
         self.collection = self.client.get_or_create_collection(
             name=self.name,
             metadata=collection_metadata,
@@ -180,6 +181,7 @@ class ChromaHandler(BaseDBHandler):
 
     @property
     def content(self) -> chromadb.GetResult:
+        """Content of the collection."""
         if not self._cached_content or self._is_collection_modified():
             try:
                 self._cached_content = self.collection.get(include=[
@@ -196,6 +198,7 @@ class ChromaHandler(BaseDBHandler):
 
     @property
     def size(self) -> int:
+        """Size of the collection."""
         if not self._cached_size or self._is_collection_modified():
             try:
                 self._cached_size = self.collection.count()
@@ -400,8 +403,36 @@ class ChromaHandler(BaseDBHandler):
             logger.error(f"Failed to instantiate PersistentClient: {e}")
             raise
 
+    def _validate_collection(self, name: Union[CollectionName, str]) -> str:
+        """Validate the provided collection name against the allowed
+        collection names. In case it is not recognised, it throws a ValueError."""
+        if not isinstance(name, (CollectionName, str)) or (
+            isinstance(name, str) and name.lower() not in CollectionName
+        ) or (
+            isinstance(name, CollectionName) and name not in CollectionName
+        ):
+            logger.error(
+                "The name of the collection may be one of "
+                f"{', '.join(name.value for name in CollectionName)}. "
+                f"Instead, '{name}' is provided."
+            )
+            raise ValueError("Collection name not recognised")
+
+        return name.value if isinstance(name, CollectionName) else name
+
     def _is_collection_modified(self) -> bool:
         return time.time() - self._last_fetch_time > self.CACHE_TIMEOUT
+
+    def _entry_is_valid_document(self, entry) -> None:
+        """Validates whether the provided entry is an instance of
+        Document. If not, it raises a TypeError."""
+        if not isinstance(entry, Document):
+            logger.error(
+                (f"A document of the wrong type was provided: `{type(entry)}` "
+                 "instead of `Document`.")
+            )
+            raise TypeError(
+                f"`doc` must be a Document instance, not a {type(entry)}")
 
 class DocumentCollectionHandler(ChromaHandler):
     """Handler for managing a collection of documents in a Chroma database.
@@ -460,13 +491,7 @@ class DocumentCollectionHandler(ChromaHandler):
             )
             raise ValueError("Wrong collection")
 
-        if not isinstance(doc, Document):
-            logger.error(
-                (f"A document of the wrong type was provided: `{type(doc)}` "
-                 "instead of `Document`.")
-            )
-            raise TypeError(
-                f"`doc` must be a Document instance, not a {type(doc)}")
+        self._entry_is_valid_document(doc)
 
         logger.info(f"Inserting the `{doc.metadata.title}` document into the DB.")
         step = int(len(doc) * 0.3)  # Log about every 30% of completion
@@ -512,6 +537,142 @@ class DocumentCollectionHandler(ChromaHandler):
                 logger.debug(f"First {page_i+1} pages added to DB [{progress:.0f}%].")
 
         logger.info("Insertion of the current document completed successfully.")
+
+class FullSummariesCollectionHandler(ChromaHandler):
+
+    def __init__(
+            self,
+            metadata: Optional[Dict[str, Any]] = None,
+            persist_directory: str = PERSIST_DIRRECTORY
+        ) -> None:
+        sentence_transformer_ef = SentenceTransformerEmbeddingFunction(
+            model_name=MODEL_SENTENCE_TRANSFORMER)
+        super().__init__(
+            CollectionName.full,
+            collection_metadata=metadata,
+            persist_directory=persist_directory,
+            embedder_function=sentence_transformer_ef
+        )
+
+    def add_entry(
+            self,
+            doc: Document
+        ) -> None:
+        if self.name != "full_summaries":
+            logger.error(
+                "Wrong collection to add whole summaries. The correct one "
+                "is \"full_summaries\"."
+            )
+            raise ValueError("Wrong collection")
+
+        self._entry_is_valid_document(doc)
+
+        logger.info(
+            f"Inserting page summaries of the `{doc.metadata.title}` document into the DB.")
+        step = int(len(doc) * 0.3)  # Log about every 30% of completion
+        ids = []
+        metadatas = []
+        for page in doc.pages:
+
+            summary = page.full_text.summarized_content
+            if not summary:
+                logger.warning(
+                    f"Page {page.number} does not have a valid summary; entry skipped.")
+                continue
+
+            ids.append(f"{doc.metadata.id}_{page.number}")
+            metadatas.append({
+                "fileId": doc.metadata.id,
+                "fileName": doc.metadata.title,
+                "source": doc.metadata.embed_link,
+                "page": page.number,
+                "summary": summary,
+                "fullText": page.full_text.raw_content
+            })
+
+            try:
+                self.collection.add(
+                    ids=ids,
+                    metadatas=metadatas
+                )
+            except Exception as e:
+                logger.error(f"Error adding summary of page {page.number}: {e}")
+                raise
+
+            if step != 0 and (page.number + 1) % step == 0:
+                progress = (page.number + 1) / len(doc) * 100
+                logger.debug(f"First {page.number+1} pages added to DB [{progress:.0f}%].")
+
+        logger.info(
+            "Insertion of summaries of the current document was successfully completed.")
+
+class ChunkSummariesCollectionHandler(ChromaHandler):
+    
+    def __init__(
+            self,
+            metadata: Optional[Dict[str, Any]] = None,
+            persist_directory: str = PERSIST_DIRRECTORY
+        ) -> None:
+        super().__init__(
+            CollectionName.chunks,
+            collection_metadata=metadata,
+            persist_directory=persist_directory
+        )
+
+    def add_entry(
+            self,
+            doc: Document,
+        ) -> None:
+        if self.name != "chunk_summaries":
+            logger.error(
+                "Wrong collection to add chunk summaries. The correct one is \"chunk_summaries\"."
+            )
+            raise ValueError("Wrong collection")
+
+        self._entry_is_valid_document(doc)
+
+        logger.info(
+            f"Inserting the chunk summaries of the `{doc.metadata.title}` document into the DB.")
+        step = int(len(doc) * 0.3)  # Log about every 30% of completion
+        for page in doc.pages:
+
+            ids = []
+            metadatas = []
+            for chunk in page.chunks:
+
+                chunk_number = int(chunk.id.split("_")[-1])
+                summary = chunk.summarized_content
+                if not summary:
+                    logger.warning(
+                        f"Chunk {chunk_number} does not have a valid summary; entry skipped.")
+                    continue
+
+                ids.append(f"{doc.metadata.id}_{chunk.id}")
+                metadatas.append({
+                    "fileId": doc.metadata.id,
+                    "fileName": doc.metadata.title,
+                    "source": doc.metadata.embed_link,
+                    "page": page.number,
+                    "chunk": chunk_number,
+                    "summary": summary,
+                    "fullText": chunk.raw_content
+                })
+
+            try:
+                self.collection.add(
+                    ids=ids,
+                    metadatas=metadatas
+                )
+            except Exception as e:
+                logger.error(f"Error adding chunks of page {page.number}: {e}")
+                raise
+
+            if step != 0 and (page.number + 1) % step == 0:
+                progress = (page.number + 1) / len(doc) * 100
+                logger.debug(f"First {page.number+1} pages added to DB [{progress:.0f}%].")
+
+        logger.info(
+            "Insertion of the chunk summaries of the current document was successfully completed.")
 
 class ContextualQuestionHandler(ChromaHandler):
     """Handler for managing in a Chroma database the contextualized

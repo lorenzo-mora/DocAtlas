@@ -38,7 +38,13 @@ logging_parameters = {
 processing_text_parameters = {
     "STEPS": Dict[str, Dict[str, bool]],
     "MIN_CHUNK_LENGTH": Optional[int],
-    "INSTALL_MISSING_NLTK": bool
+    "INSTALL_MISSING_NLTK": bool,
+    "SUMMARIZATION": {
+        "active": bool,
+        "modelName": str,
+        "maxSummaryLength": int,
+        "minSummaryLength": int,
+    }
 }
 
 redis_parameters = {

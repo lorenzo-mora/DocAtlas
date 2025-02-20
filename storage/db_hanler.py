@@ -571,6 +571,7 @@ class FullSummariesCollectionHandler(ChromaHandler):
             f"Inserting page summaries of the `{doc.metadata.title}` document into the DB.")
         step = int(len(doc) * 0.3)  # Log about every 30% of completion
         ids = []
+        documents = []
         metadatas = []
         for page in doc.pages:
 
@@ -581,18 +582,19 @@ class FullSummariesCollectionHandler(ChromaHandler):
                 continue
 
             ids.append(f"{doc.metadata.id}_{page.number}")
+            documents.append(summary)
             metadatas.append({
                 "fileId": doc.metadata.id,
                 "fileName": doc.metadata.title,
                 "source": doc.metadata.embed_link,
                 "page": page.number,
-                "summary": summary,
                 "fullText": page.full_text.raw_content
             })
 
             try:
                 self.collection.add(
                     ids=ids,
+                    documents=documents,
                     metadatas=metadatas
                 )
             except Exception as e:
@@ -605,6 +607,30 @@ class FullSummariesCollectionHandler(ChromaHandler):
 
         logger.info(
             "Insertion of summaries of the current document was successfully completed.")
+
+    def retrieve_summary(
+            self,
+            query: str,
+            top_k: int = 3
+        ) -> Dict[str, List[str]]:
+        """Retrieves the most relevant document summaries from collection."""
+        output = {"summaries": [], "full_text": []}
+        try:
+            results = self.collection.query(
+                query_texts=query,
+                n_results=top_k,
+                include=[IncludeEnum.metadatas, IncludeEnum.documents]
+            )
+        except Exception as e:
+            logger.error(f"Error querying collection: {e}")
+            return output
+
+        if results["documents"]:
+            output["summaries"] = results["documents"][0]
+        if results["metadatas"]:
+            output["full_text"] = [metadata["fullText"] for metadata in results["metadatas"][0]]
+
+        return output
 
 class ChunkSummariesCollectionHandler(ChromaHandler):
     

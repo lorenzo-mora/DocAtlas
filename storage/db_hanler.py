@@ -434,7 +434,7 @@ class ChromaHandler(BaseDBHandler):
             raise TypeError(
                 f"`doc` must be a Document instance, not a {type(entry)}")
 
-class DocumentCollectionHandler(ChromaHandler):
+class DocumentsCollectionHandler(ChromaHandler):
     """Handler for managing a collection of documents in a Chroma database.
 
     Attributes
@@ -501,7 +501,7 @@ class DocumentCollectionHandler(ChromaHandler):
             batch_ids = []
             batch_embeddings = []
             batch_metadatas = []
-            for chunk in page.chunks:
+            for chunk in page.paragraphs:
 
                 if not stricted or chunk.embedding:
                     batch_documents.append(chunk.raw_content)
@@ -546,7 +546,8 @@ class FullSummariesCollectionHandler(ChromaHandler):
             persist_directory: str = PERSIST_DIRRECTORY
         ) -> None:
         sentence_transformer_ef = SentenceTransformerEmbeddingFunction(
-            model_name=MODEL_SENTENCE_TRANSFORMER)
+            model_name=MODEL_SENTENCE_TRANSFORMER,
+        )
         super().__init__(
             CollectionName.full,
             collection_metadata=metadata,
@@ -639,10 +640,14 @@ class ChunkSummariesCollectionHandler(ChromaHandler):
             metadata: Optional[Dict[str, Any]] = None,
             persist_directory: str = PERSIST_DIRRECTORY
         ) -> None:
+        sentence_transformer_ef = SentenceTransformerEmbeddingFunction(
+            model_name=MODEL_SENTENCE_TRANSFORMER,
+        )
         super().__init__(
             CollectionName.chunks,
             collection_metadata=metadata,
-            persist_directory=persist_directory
+            persist_directory=persist_directory,
+            embedder_function=sentence_transformer_ef
         )
 
     def add_entry(
@@ -663,8 +668,9 @@ class ChunkSummariesCollectionHandler(ChromaHandler):
         for page in doc.pages:
 
             ids = []
+            documents = []
             metadatas = []
-            for chunk in page.chunks:
+            for chunk in page.paragraphs:
 
                 chunk_number = int(chunk.id.split("_")[-1])
                 summary = chunk.summarized_content
@@ -674,19 +680,25 @@ class ChunkSummariesCollectionHandler(ChromaHandler):
                     continue
 
                 ids.append(f"{doc.metadata.id}_{chunk.id}")
+                documents.append(summary)
                 metadatas.append({
                     "fileId": doc.metadata.id,
                     "fileName": doc.metadata.title,
                     "source": doc.metadata.embed_link,
                     "page": page.number,
                     "chunk": chunk_number,
-                    "summary": summary,
                     "fullText": chunk.raw_content
                 })
 
+            if not documents:
+                logger.warning(
+                    (f"None of the chunks on the {page.number} page have valid "
+                     "text; insertion skipped."))
+                continue
             try:
                 self.collection.add(
                     ids=ids,
+                    documents=documents,
                     metadatas=metadatas
                 )
             except Exception as e:
@@ -699,6 +711,30 @@ class ChunkSummariesCollectionHandler(ChromaHandler):
 
         logger.info(
             "Insertion of the chunk summaries of the current document was successfully completed.")
+
+    def retrieve_summary(
+            self,
+            query: str,
+            top_k: int = 3
+        ) -> Dict[str, List[str]]:
+        """Retrieves the most relevant chunk summaries from collection."""
+        output = {"summaries": [], "full_text": []}
+        try:
+            results = self.collection.query(
+                query_texts=query,
+                n_results=top_k,
+                include=[IncludeEnum.metadatas, IncludeEnum.documents]
+            )
+        except Exception as e:
+            logger.error(f"Error querying collection: {e}")
+            return output
+
+        if results["documents"]:
+            output["summaries"] = results["documents"][0]
+        if results["metadatas"]:
+            output["full_text"] = [metadata["fullText"] for metadata in results["metadatas"][0]]
+
+        return output
 
 class ContextualQuestionHandler(ChromaHandler):
     """Handler for managing in a Chroma database the contextualized
@@ -724,7 +760,7 @@ class ContextualQuestionHandler(ChromaHandler):
             persist_directory: str = PERSIST_DIRRECTORY
         ) -> None:
         sentence_transformer_ef = SentenceTransformerEmbeddingFunction(
-            model_name=MODEL_SENTENCE_TRANSFORMER
+            model_name=MODEL_SENTENCE_TRANSFORMER,
         )
         super().__init__(
             CollectionName.questions,
@@ -796,7 +832,7 @@ class ContextualResponseHandler(ChromaHandler):
             persist_directory: str = PERSIST_DIRRECTORY
         ) -> None:
         sentence_transformer_ef = SentenceTransformerEmbeddingFunction(
-            model_name=MODEL_SENTENCE_TRANSFORMER
+            model_name=MODEL_SENTENCE_TRANSFORMER,
         )
         super().__init__(
             CollectionName.answers,

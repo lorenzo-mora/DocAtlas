@@ -1,6 +1,7 @@
 from functools import lru_cache
+import itertools
 import re
-from typing import Any, Dict, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 from bs4 import BeautifulSoup
 import contractions
@@ -9,7 +10,9 @@ import nltk
 from nltk.corpus import wordnet
 from nltk.tokenize import word_tokenize, TreebankWordDetokenizer
 from nltk import pos_tag
+import numpy as np
 from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 import spacy
 import spacy.tokens
 from textblob import TextBlob
@@ -24,7 +27,7 @@ from config.processing_text import (
 )
 from logger.helper import timed_block
 from logger.setup import LoggerHandler
-from text.components import Document
+from text.components import Document, Page, TextBlock
 
 
 disable_propagation()
@@ -127,6 +130,7 @@ class TextProcessor:
         `SentenceTransformer` model.
     """
 
+    sentence_pat = re.compile(r'(?<=[.?!])\s+')
     special_char_pat = re.compile(r'[^a-z0-9 ]')
     extra_spaces_pat = re.compile(r'\s+')
     digits_pat = re.compile(r'\d+')
@@ -273,6 +277,12 @@ class TextProcessor:
             logger.warning(
                 "Length of text less than the maximum length required; half "
                 f"the length of the text ({max_length}) is used as the maximum length."
+            )
+        if max_length < min_length:
+            min_length = len(text)//3
+            logger.warning(
+                "Minimum length is greater than the maximum length required; one third of "
+                f"the length of the text ({min_length}) is used as the minimum length."
             )
 
         try:
@@ -488,56 +498,140 @@ class TextProcessor:
 
         return self.extra_spaces_pat.sub(' ', text).strip()
 
-    def process_text(
-            self,
-            file: Document
-        ) -> None:
-        """Application of all pre-processing steps in the order they are
-        specified in the configuration."""
-        logger.info(
-            f"Text processing of the file `{file.metadata.title}` has begun.")
+    def chunk_text(self, text: str, threshold: int = 80) -> List[str]:
+        """Divide the input text into chunks based on sentence similarity.
 
-        with timed_block(f"Document processing took", logger):
-            for page in file.pages:
-                step = int(len(page) * 0.2)  # Log about every 20% of completion
-                for chunk_i, chunk in enumerate(page.chunks):
-                    if bool(chunk.processed_content):
-                        # Text processing for this chunk has already been done
-                        logger.warning("Chunk already processed; it is skipped.")
-                        continue
+        Parameters
+        ----------
+        text : str
+            The text to be chunked.
+        threshold : int, optional
+            The percentile threshold for determining chunk breakpoints,
+            default is 80.
 
-                    processed_text = chunk.raw_content
-                    if self.ff_is_active:
-                        processed_text = self._apply_fast_forward_procedures(chunk.raw_content)
-                    elif self.id_is_active:
-                        processed_text = self._apply_in_depth_procedures(chunk.raw_content)
+        Returns
+        -------
+        List[str]
+            A list of text chunks, where each chunk is a group of
+            sentences with high similarity.
 
-                    chunk.processed_content = processed_text
+        Notes
+        -----
+        The algorithm involves dividing a given text into semantically
+        meaningful chunks using vector embeddings and cosine similarity.
 
-                    if self.summary_is_active:
-                        chunk.summarized_content = self.summarize_text(
-                            chunk.raw_content)
+        First, the text is broken down into sentences, which are
+        converted into vector embeddings.
+        Instead of computing cosine similarity between consecutive
+        sentences, each sentence is grouped with its neighboring
+        sentences (previous and following) before computing similarity.
+        This improves segmentation by capturing contextual meaning
+        across sentence boundaries.
 
-                    if step != 0 and (chunk_i + 1) % step == 0:
-                        progress = (chunk_i + 1) / len(page) * 100
-                        logger.debug(
-                            f"{progress:.0f}% of page {page.number} text processing completed."
-                        )
+        A threshold (e.g., 0.8) determines the division of groups: when
+        the similarity between two consecutive groups exceeds this
+        value, a new group begins. This method helps preserve context
+        and improves chunking accuracy.
+        """
+        if not text:
+            return []
 
-                if self.summary_is_active:
-                    page.full_text.summarized_content = self.summarize_text(
-                        page.full_text.raw_content)
+        # Split input text into individual sentences when punctuation is
+        # followed by whitespace.
+        single_sentences = self.sentence_pat.split(text)
 
-                logger.debug(f"Page {page.number} successfully processed.")
+        # Combine adjacent sentences to form a context window around
+        # each sentence.
+        combined_sentences = self._combine_sentences_with_context(single_sentences)
+        
+        # Convert the combined sentences into vector representations.
+        embeddings = [self._text_to_vector(sent) for sent in combined_sentences]
+        
+        # Calculate the cosine distances between consecutive combined
+        # sentence embeddings to measure similarity.
+        distances = self._consecutive_cosine_distances(embeddings)
+        
+        # Determine the threshold distance for breakpoint identification
+        # based on the `threshold` percentile (80th percentile) of all
+        # distances.
+        bkp_distance_thr = np.percentile(distances, threshold)
 
+        # Indices where the distance exceeds the calculated threshold
+        # (potential chunk breakpoint).
+        indices_above_thr = [
+            i for i, distance in enumerate(distances)
+            if distance > bkp_distance_thr
+        ]
+        # Loop through the identified breakpoints and create chunks.
+        chunks = []
+        for key, group in itertools.groupby(enumerate(single_sentences), 
+                                            lambda x: x[0] in indices_above_thr):
+            if not key:
+                chunks.append(' '.join(sentence for _, sentence in group))
+        return chunks
+
+    def process_page_text(self, page: Page) -> None:
+        """Process the textual content of a given page by applying
+        *fast-forward* or *in-dept* text processing procedures,
+        depending on the active configuration, and optionally
+        summarizing the content  of the entire page, if summarization is
+        active.
+        """
         logger.debug(
-            "Processing of current document content successfully completed.")
+            f"Text processing of page {page.number} of the current document.")
+
+        step = int(len(page) * 0.2)  # Log about every 20% of completion
+        for par_i, par in enumerate(page.paragraphs):
+
+            if bool(par.processed_content):
+                # Text processing for this chunk has already been done
+                logger.warning("Chunk already processed; it is skipped.")
+                continue
+
+            processed_text = par.raw_content
+            if self.ff_is_active:
+                processed_text = self._apply_fast_forward_procedures(par.raw_content)
+            elif self.id_is_active:
+                processed_text = self._apply_in_depth_procedures(par.raw_content)
+
+            par.processed_content = processed_text
+
+            if step != 0 and (par_i + 1) % step == 0:
+                progress = (par_i + 1) / len(page) * 100
+                logger.debug(
+                    f"{progress:.0f}% of page {page.number} text processing completed."
+                )
+
+        if self.summary_is_active:
+            page.full_text.summarized_content = self.summarize_text(
+                page.full_text.raw_content)
+
+        logger.debug(f"Page {page.number} successfully processed.")
+
+    def compute_paragraph_embedding(self, page: Page) -> None:
+        """Compute embeddings for each paragraph in a given page using
+        the SentenceTransformer model.
+        """
+        logger.debug(
+            f"Generation of the embedding of page {page.number} of the current document.")
+
+        with timed_block(f"Embedding generation for page {page.number} took", logger):
+
+            step = int(len(page) * 0.22)  # Log about every 22% of completion
+            for par_i, par in enumerate(page.paragraphs):
+
+                if par.processed_content:
+                    par.embedding = self._text_to_vector(
+                        par.processed_content)
+
+                if step != 0 and (par_i + 1) % step == 0:
+                    progress = (par_i + 1) / len(page) * 100
+                    logger.debug(
+                        f"{progress:.0f}% of the embeddings generation completed.")
 
     def compute_embedding(self, file: Document) -> None:
         """Compute the embeddings of the processed text chunks using the
         `SentenceTransformer` model."""
-        self.process_text(file)
-
         logger.info(
             f"Embedding generation for the document `{file.metadata.title}`.")
 
@@ -547,26 +641,56 @@ class TextProcessor:
             with timed_block(f"Embedding generation for page {page.number} took", logger):
 
                 step = int(len(page) * 0.22)  # Log about every 22% of completion
-                for chunk_i, chunk in enumerate(page.chunks):
+                for chunk_i, chunk in enumerate(page.paragraphs):
 
                     if step != 0 and (chunk_i + 1) % step == 0:
                         progress = (chunk_i + 1) / len(page) * 100
                         logger.debug(
-                            f"{progress:.0f}% of the embeddings generation completed")
+                            f"{progress:.0f}% of the embeddings generation completed.")
 
                     if chunk.processed_content:
-                        try:
-                            chunk.embedding = self.embedder_model.encode(
-                                sentences=chunk.processed_content,
-                                convert_to_tensor=True,
-                                show_progress_bar=False
-                            ).tolist()
-                        except Exception as e:
-                            logger.warning(
-                                f"Error in the generation of the embedding: {e}")
-                            chunk.embedding = [-0.0]*self.embedding_size
+                        chunk.embedding = self._text_to_vector(
+                            chunk.processed_content)
 
         logger.info("Embeddings for the current document were elaborated.")
+
+    def document_chunking(self, file: Document) -> None:
+        """Chunk the text content of a document into smaller text
+        blocks. It then generates embedding of the determined chunks of
+        text."""
+        logger.debug(
+            f"Text chunking of the file `{file.metadata.title}` has begun.")
+
+        with timed_block(f"Document chunking took", logger):
+            full_text = "\n".join(page.full_text.raw_content for page in file.pages)
+            file.chunks = [
+                TextBlock(id=str(i), content=chunk)
+                for i, chunk in enumerate(self.chunk_text(full_text))
+            ]
+            logger.debug(f"Number of chunks created: {len(file.chunks)}")
+
+            for chunk in file.chunks:
+                if chunk.raw_content:
+                    chunk.embedding = self._text_to_vector(
+                        chunk.raw_content)
+
+        logger.debug("The chunking of the current document has been completed.")
+
+    def process_document(self, file: Document) -> None:
+        """Process a document by applying text processing and embedding
+        generation to each page, followed by document chunking.
+        """
+        logger.info(f"Processing of the `{file.metadata.title}` file started.")
+
+        with timed_block(f"Document processing and embedding generation took", logger):
+            for page in file.pages:
+                self.process_page_text(page)
+                self.compute_paragraph_embedding(page)
+
+        self.document_chunking(file)
+
+        logger.info(
+            "Processing of current document content successfully completed.")
 
     def _validate_text(
             self,
@@ -777,3 +901,72 @@ class TextProcessor:
                 name != "summarization"):
                 text = self.IN_DEPTH_PROCEDURES[name](text)
         return text
+
+    def _text_to_vector(self, text: str) -> List[float]:
+        """Convert input text into a vector representation using the
+        SentenceTransformer model."""
+        if not text:
+            return np.zeros(self.embedding_size).tolist()
+
+        try:
+            return self.embedder_model.encode(
+                sentences=text,
+                convert_to_tensor=True,
+                show_progress_bar=False
+            ).tolist()
+        except RuntimeError as e:
+            logger.warning(
+                f"Runtime error in the generation of the embedding: {e}")
+            return np.zeros(self.embedding_size).tolist()
+
+    def _combine_sentences_with_context(self, sentences: List[str]) -> List[str]:
+        """Combine each sentence with its preceding and following
+        sentences to provide additional context.
+
+        Parameters
+        ----------
+        sentences : List[str]
+            A list of sentences to be combined with context.
+
+        Returns
+        -------
+        List[str]
+            A list of sentences where each sentence is combined with its
+            previous and next sentence, except for the first and last
+            sentences which are combined with only one adjacent sentence.
+        """
+        if not sentences:
+            return []
+
+        return [
+            (sentences[i-1] + ' ' if i > 0 else '') +
+            sentences[i] +
+            (' ' + sentences[i+1] if i < len(sentences) - 1 else '')
+            for i in range(len(sentences))
+        ]
+
+    def _consecutive_cosine_distances(
+            self,
+            embeddings: Union[np.ndarray, List[List[float]]]
+        ) -> List[float]:
+        """Calculate the cosine distances, defined as 1 minus the cosine
+        similarity, between each pair of consecutive embeddings.
+
+        Parameters
+        ----------
+        embeddings : Union[np.ndarray, List[List[float]]]
+            A collection of embeddings for which consecutive cosine
+            distances are to be calculated.
+
+        Returns
+        -------
+        List[float]
+            A list of cosine distances between each pair of consecutive
+            embeddings. Returns an empty list if no embeddings are provided.
+        """
+        if not embeddings:
+            return []
+
+        embeddings = np.array(embeddings)
+        distances = 1 - np.diag(cosine_similarity(embeddings[:-1], embeddings[1:]))
+        return distances.tolist()

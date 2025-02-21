@@ -155,7 +155,7 @@ class TextBlock:
         Summarized version of the text content.
     embedding : List[float]
         List representing the embedding of the text content.
-    coordinates : List[int | float]
+    coordinates : List[int | float] or None
         Coordinates of the text block's bounding box in the document.
 
     Methods
@@ -258,9 +258,9 @@ class Page:
         Page number in the document.
     source_page_object : pymupdf.Page
         Original page object from which content is extracted.
-    chunks : list of TextBlock
-        List of text blocks extracted from the page content within the
-        defined boundaries.
+    paragraphs : List[TextBlock]
+        List of the paragraphs extracted from the page content within
+        the defined boundaries.
     full_text : TextBlock
         Single text block representing the entire page content within
         specified boundaries.
@@ -287,7 +287,7 @@ class Page:
         ) -> None:
         self.number = number
         self.source_page_object = page_object
-        self.chunks = self.extract_paragraphs(normalize)
+        self.paragraphs = self.extract_paragraphs(normalize)
         self.full_text = self.extract_bounded_text(normalize)
 
     @property
@@ -493,7 +493,7 @@ class Page:
             content, filtered by the specified chunk types.
         """
         id_length = len(str(len(self)))
-        keys = [format_index_with_padding(i, id_length) for i in range(len(self.chunks))]
+        keys = [format_index_with_padding(i, id_length) for i in range(len(self.paragraphs))]
 
         # values = [
         #     {**chunk.serialize_content(raw_chunks, processed_chunks, embedded_chunks), "page": self.number}
@@ -501,7 +501,7 @@ class Page:
         #     for chunk in self.chunks if chunk.embedding or not exclude_empty
         # ]
         values = []
-        for chunk in self.chunks:
+        for chunk in self.paragraphs:
             if chunk.embedding or not exclude_empty:
                 try:
                     serialized_content = chunk.serialize_content(
@@ -516,10 +516,10 @@ class Page:
         return {key: value for key, value in zip(keys, values)}
 
     def __len__(self) -> int:
-        return len(self.chunks)
+        return len(self.paragraphs)
 
     def __str__(self):
-        return f'{"| ".join(str(chk) for chk in self.chunks)}'
+        return f'{"| ".join(str(chk) for chk in self.paragraphs)}'
 
     def __repr__(self):
         return str(self.source_page_object)
@@ -574,7 +574,10 @@ class Document:
         A list of Page objects representing the pages of the document.
     metadata : DocInfo
         An instance of DocInfo containing metadata about the document.
+    chunks : List[TextBlock]
+        List of the chunks extracted from the document content.
     """
+    chunks: List[TextBlock] = []
 
     def __init__(self, pages: List[Page], info: DocInfo) -> None:
         if (not isinstance(pages, list) or

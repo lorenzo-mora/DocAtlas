@@ -10,7 +10,7 @@ from storage.loading import Uploader
 from text.extraction import TextExtractor
 from text.processing import TextProcessor
 from logger.setup import LoggerHandler
-from storage.db_hanler import DocumentCollectionHandler
+from storage.db_hanler import DocumentsCollectionHandler
 
 
 log_handler = LoggerHandler(
@@ -33,7 +33,7 @@ def run():
     file_manager = Uploader(folder_path=PDF_SOURCE_FOLDER)  # PDF file uploader
     content_extractor = TextExtractor(folder_path=PDF_SOURCE_FOLDER)  # PDF file extractor
     processor = TextProcessor()  # Document textual content processor
-    chroma = DocumentCollectionHandler(
+    chroma = DocumentsCollectionHandler(
         metadata={
             "description": (
                 "Information of various files, such as file name, source path "

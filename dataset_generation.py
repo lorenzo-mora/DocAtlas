@@ -7,7 +7,7 @@ from logger.helper import timed_block
 from logger.setup import LoggerHandler
 from storage.db_hanler import (
     ContextualQuestionHandler,
-    DocumentsCollectionHandler,
+    ParagraphsCollectionHandler,
     ContextualResponseHandler
 )
 from training.generator import ContextualQuestionResponseGenerator
@@ -31,7 +31,7 @@ def run():
     logger.info(f"{chr(0x1F916)}{chr(0x1F4DD)} The dataset generation pipeline is executed.")
 
     # ChromaDB collection handlers
-    documents_handler = DocumentsCollectionHandler()  # `documents` collection
+    documents_handler = ParagraphsCollectionHandler()  # `documents` collection
     cq_handler = ContextualQuestionHandler(
         metadata={
             "description": (

@@ -1,10 +1,11 @@
 from dataclasses import dataclass
+from functools import cmp_to_key
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import pymupdf
 
-from config.file_management import TEXT_BOUNDARIES_PAGE
-from utils import format_index_with_padding
+from config.file_management import TEXT_MARGIN_RESIZING_FACTOR
+from utils import convert_case, format_index_with_padding
 
 @dataclass(frozen=True)
 class ContextualQA:
@@ -403,7 +404,7 @@ class Page:
             option="blocks", textpage=content_text)
 
         # Sort text blocks for logical reading order (top-to-bottom, left-to-right)
-        page_content = sorted(page_content, key=lambda b: (b[1], b[0]))
+        page_content = sorted(page_content, key=self.coordinate_sorting(delta_x=10))
 
         extracted_texts: List[str] = []
         merged_bbox = BoundingBox(
@@ -451,11 +452,55 @@ class Page:
             page dimensions.
         """
         return (
-            width * TEXT_BOUNDARIES_PAGE["x"][0],
-            height * TEXT_BOUNDARIES_PAGE["y"][0],
-            width * TEXT_BOUNDARIES_PAGE["x"][1],
-            height * TEXT_BOUNDARIES_PAGE["y"][1]
+            width * TEXT_MARGIN_RESIZING_FACTOR["x"][0],
+            height * TEXT_MARGIN_RESIZING_FACTOR["y"][0],
+            width * TEXT_MARGIN_RESIZING_FACTOR["x"][1],
+            height * TEXT_MARGIN_RESIZING_FACTOR["y"][1]
         )
+
+    @staticmethod
+    def coordinate_sorting(delta_x: float):
+        """Comparator key function for sorting coordinate tuples based
+        on x0 primarily, and y0 secondarily when x0 values are within a
+        given threshold.
+
+        Parameters
+        ----------
+        delta_x : float
+            The threshold for determining if x-coordinates are close
+            enough to require secondary sorting by y-coordinates.
+
+        Returns
+        -------
+        Callable
+            A key function that can be used with sorting functions to
+            order tuples primarily by x-coordinate and secondarily by
+            y-coordinate if x-coordinates are within the delta_x threshold.
+
+        Examples
+        --------
+        >>> coordinates = [
+        ...     (5, 10), (2, 20), (5, 5), (3, 15)
+        ... ]
+        >>> sorted_coordinates = sorted(coordinates, key=coordinate_sorting_function(1))
+        >>> print(sorted_coordinates)
+        [(2, 20), (3, 15), (5, 5), (5, 10)]
+        """
+        def compare(
+                a: Tuple[float, float, Any],
+                b: Tuple[float, float, Any]
+            ) -> int:
+            x0_a, y0_a, *_ = a
+            x0_b, y0_b, *_ = b
+            
+            # Primary sorting by x0
+            if abs(x0_a - x0_b) > delta_x:
+                return -1 if x0_a < x0_b else 1
+            
+            # Secondary sorting by y0 if x0 values are close
+            return -1 if y0_a < y0_b else 1
+        
+        return cmp_to_key(compare)
 
     def get_serialized_content(
             self,
@@ -540,7 +585,11 @@ class DocInfo:
 
     """
     id: str
+    file_name: str
     title: str
+    author: str
+    subject: str
+    keywords: str
     embed_link: str
 
     @classmethod
@@ -549,14 +598,45 @@ class DocInfo:
         
         Raises a ValueError if required fields are missing.
         """
-        if "file_id" not in info or "title" not in info:
-            raise ValueError("Missing required fields: 'file_id' and/or 'title'")
+        if "file_id" not in info or "file_name" not in info:
+            raise ValueError("Missing required fields: 'file_id' and/or 'file_name'")
 
         return cls(
             id=info["file_id"],
-            title=info["title"],
-            embed_link=info.get("embedLink", None) or info.get("link", None)
+            file_name=info["file_name"],
+            title=info.get("title", ""),
+            author=info.get("author", ""),
+            subject=info.get("subject", "") or info.get("topic", ""),
+            keywords=info.get("keywords", "") or info.get("tags", ""),
+            embed_link=info.get("embedLink", None) or info.get("link", None) or info.get("file_path", None),
         )
+
+    def to_dict(
+            self,
+            json_format: bool = False,
+            extra_fields: Optional[Dict[str, Any]] = None
+        ) -> dict[str, Any]:
+        """Convert the DocInfo instance to a dictionary.
+
+        Parameters
+        ----------
+        json_format : bool, optional
+            If True, converts dictionary keys to camelCase, by default False.
+        extra_fields : Optional[Dict[str, Any]], optional
+            Additional fields to include in the dictionary, by default None.
+        """
+        info: dict[str, Any] = {
+            k: v for k, v in self.__dict__.items()
+            if k in {"id", "file_name", "title", "author", "subject", "keywords", "embed_link"}
+        }
+
+        if extra_fields:
+            info.update(extra_fields)
+
+        if json_format:
+            info = {convert_case(k, to_camel_case=True): v for k, v in info.items()}
+
+        return info
 
     def __str__(self):
         return f'{self.id} - {self.title}'
@@ -576,8 +656,11 @@ class Document:
         An instance of DocInfo containing metadata about the document.
     chunks : List[TextBlock]
         List of the chunks extracted from the document content.
+    full_text : str
+        Full textual content of the document.
     """
     chunks: List[TextBlock] = []
+    full_text: str
 
     def __init__(self, pages: List[Page], info: DocInfo) -> None:
         if (not isinstance(pages, list) or
@@ -596,7 +679,8 @@ class Document:
 
         Raises a ValueError if required fields are missing.
         """
-        if "pages" not in file_content or "info" not in file_content:
+        if ("pages" not in file_content or (
+            "info" not in file_content and "metadata" not in file_content)):
             raise ValueError("Missing required keys: 'pages' and/or 'info'")
 
         pages = cls.extract_pages(file_content)
@@ -611,7 +695,8 @@ class Document:
     @staticmethod
     def extract_info(file_content: Dict[str, Any]) -> DocInfo:
         """Extracts `DocInfo` from the provided dictionary."""
-        return DocInfo.from_dict(file_content.get("info", {}))
+        document_info: Dict[str, Any] = file_content.get("info", None) or file_content.get("metadata", {})
+        return DocInfo.from_dict(document_info)
 
     def serialize(
             self,
@@ -691,7 +776,7 @@ class Document:
 
         return {
             "id": getattr(self.metadata, 'id', '<ID>'),
-            "name": getattr(self.metadata, 'title', '<TITLE>'),
+            "name": getattr(self.metadata, 'file_name', '<NAME>'),
             "location": getattr(self.metadata, 'embed_link', '<SOURCE_PATH>'),
             "content": content_pages
         }

@@ -31,9 +31,9 @@ load_dotenv()
 ENVIRONMENT = os.environ.get('ENV', "DEV")
 
 class CollectionName(str, enum.Enum):
-    documents = "documents"
-    full = "full_summaries"
-    chunks = "chunk_summaries"
+    paragraphs = "paragraphs"
+    pages = "page_summary"
+    chunks = "semantic_chunks"
     questions = "contextual_questions"
     answers = "generated_answers"
 
@@ -434,7 +434,7 @@ class ChromaHandler(BaseDBHandler):
             raise TypeError(
                 f"`doc` must be a Document instance, not a {type(entry)}")
 
-class DocumentsCollectionHandler(ChromaHandler):
+class ParagraphsCollectionHandler(ChromaHandler):
     """Handler for managing a collection of documents in a Chroma database.
 
     Attributes
@@ -457,7 +457,7 @@ class DocumentsCollectionHandler(ChromaHandler):
             persist_directory: str = PERSIST_DIRRECTORY
         ) -> None:
         super().__init__(
-            CollectionName.documents,
+            CollectionName.paragraphs,
             collection_metadata=metadata,
             persist_directory=persist_directory
         )
@@ -485,9 +485,9 @@ class DocumentsCollectionHandler(ChromaHandler):
         Exception
             If an error occurs while adding a chunk to the collection.
         """
-        if self.name != "documents":
+        if self.name != "paragraphs":
             logger.error(
-                "Wrong collection to add a document to. The correct one is \"documents\"."
+                "Wrong collection to add a document to. The correct one is \"paragraphs\"."
             )
             raise ValueError("Wrong collection")
 
@@ -517,8 +517,8 @@ class DocumentsCollectionHandler(ChromaHandler):
 
             if not batch_embeddings:
                 logger.warning(
-                    (f"None of the chunks on the {page.number} page have valid "
-                     "text; insertion skipped."))
+                    f"None of the chunks on the {page.number} page have valid "
+                    "text; insertion skipped.")
                 continue
             try:
 
@@ -538,7 +538,7 @@ class DocumentsCollectionHandler(ChromaHandler):
 
         logger.info("Insertion of the current document completed successfully.")
 
-class FullSummariesCollectionHandler(ChromaHandler):
+class PagesCollectionHandler(ChromaHandler):
 
     def __init__(
             self,
@@ -549,7 +549,7 @@ class FullSummariesCollectionHandler(ChromaHandler):
             model_name=MODEL_SENTENCE_TRANSFORMER,
         )
         super().__init__(
-            CollectionName.full,
+            CollectionName.pages,
             collection_metadata=metadata,
             persist_directory=persist_directory,
             embedder_function=sentence_transformer_ef
@@ -559,10 +559,10 @@ class FullSummariesCollectionHandler(ChromaHandler):
             self,
             doc: Document
         ) -> None:
-        if self.name != "full_summaries":
+        if self.name != "page_summary":
             logger.error(
                 "Wrong collection to add whole summaries. The correct one "
-                "is \"full_summaries\"."
+                "is \"page_summary\"."
             )
             raise ValueError("Wrong collection")
 
@@ -571,9 +571,6 @@ class FullSummariesCollectionHandler(ChromaHandler):
         logger.info(
             f"Inserting page summaries of the `{doc.metadata.title}` document into the DB.")
         step = int(len(doc) * 0.3)  # Log about every 30% of completion
-        ids = []
-        documents = []
-        metadatas = []
         for page in doc.pages:
 
             summary = page.full_text.summarized_content
@@ -582,21 +579,17 @@ class FullSummariesCollectionHandler(ChromaHandler):
                     f"Page {page.number} does not have a valid summary; entry skipped.")
                 continue
 
-            ids.append(f"{doc.metadata.id}_{page.number}")
-            documents.append(summary)
-            metadatas.append({
-                "fileId": doc.metadata.id,
-                "fileName": doc.metadata.title,
-                "source": doc.metadata.embed_link,
-                "page": page.number,
-                "fullText": page.full_text.raw_content
-            })
-
             try:
                 self.collection.add(
-                    ids=ids,
-                    documents=documents,
-                    metadatas=metadatas
+                    ids=f"{doc.metadata.id}_{page.number}_p",
+                    documents=summary,
+                    metadatas={
+                        "fileId": doc.metadata.id,
+                        "fileName": doc.metadata.title,
+                        "source": doc.metadata.embed_link,
+                        "page": page.number,
+                        "fullText": page.full_text.raw_content
+                    }
                 )
             except Exception as e:
                 logger.error(f"Error adding summary of page {page.number}: {e}")
@@ -615,7 +608,7 @@ class FullSummariesCollectionHandler(ChromaHandler):
             top_k: int = 3
         ) -> Dict[str, List[str]]:
         """Retrieves the most relevant document summaries from collection."""
-        output = {"summaries": [], "full_text": []}
+        output = {"summary": [], "full_text": [], "page_number": []}
         try:
             results = self.collection.query(
                 query_texts=query,
@@ -627,13 +620,14 @@ class FullSummariesCollectionHandler(ChromaHandler):
             return output
 
         if results["documents"]:
-            output["summaries"] = results["documents"][0]
+            output["summary"] = results["documents"][0]
         if results["metadatas"]:
             output["full_text"] = [metadata["fullText"] for metadata in results["metadatas"][0]]
+            output["page_number"] = [metadata["page"] for metadata in results["metadatas"][0]]
 
         return output
 
-class ChunkSummariesCollectionHandler(ChromaHandler):
+class ChunksCollectionHandler(ChromaHandler):
     
     def __init__(
             self,
@@ -654,71 +648,55 @@ class ChunkSummariesCollectionHandler(ChromaHandler):
             self,
             doc: Document,
         ) -> None:
-        if self.name != "chunk_summaries":
+        if self.name != "semantic_chunks":
             logger.error(
-                "Wrong collection to add chunk summaries. The correct one is \"chunk_summaries\"."
+                "Wrong collection to add semantic chunks. The correct one is \"semantic_chunks\"."
             )
             raise ValueError("Wrong collection")
 
         self._entry_is_valid_document(doc)
 
         logger.info(
-            f"Inserting the chunk summaries of the `{doc.metadata.title}` document into the DB.")
-        step = int(len(doc) * 0.3)  # Log about every 30% of completion
-        for page in doc.pages:
+            f"Inserting the semantic chunks of the `{doc.metadata.title}` document into the DB.")
+        step = int(len(doc.chunks) * 0.3)  # Log about every 30% of completion
+        for chunk in doc.chunks:
 
-            ids = []
-            documents = []
-            metadatas = []
-            for chunk in page.paragraphs:
-
-                chunk_number = int(chunk.id.split("_")[-1])
-                summary = chunk.summarized_content
-                if not summary:
-                    logger.warning(
-                        f"Chunk {chunk_number} does not have a valid summary; entry skipped.")
-                    continue
-
-                ids.append(f"{doc.metadata.id}_{chunk.id}")
-                documents.append(summary)
-                metadatas.append({
-                    "fileId": doc.metadata.id,
-                    "fileName": doc.metadata.title,
-                    "source": doc.metadata.embed_link,
-                    "page": page.number,
-                    "chunk": chunk_number,
-                    "fullText": chunk.raw_content
-                })
-
-            if not documents:
+            chunk_content = chunk.raw_content
+            if not chunk_content:
                 logger.warning(
-                    (f"None of the chunks on the {page.number} page have valid "
-                     "text; insertion skipped."))
+                    f"Semantic chunk {chunk.id} does not have a valid content; entry skipped.")
                 continue
+
             try:
                 self.collection.add(
-                    ids=ids,
-                    documents=documents,
-                    metadatas=metadatas
+                    ids=f"{doc.metadata.id}_{chunk.id}_c",
+                    documents=chunk_content,
+                    metadatas={
+                        "fileId": doc.metadata.id,
+                        "fileName": doc.metadata.title,
+                        "source": doc.metadata.embed_link,
+                        "chunk": chunk.id
+                    }
                 )
             except Exception as e:
-                logger.error(f"Error adding chunks of page {page.number}: {e}")
+                logger.error(f"Error adding semantic chunks: {e}")
                 raise
 
-            if step != 0 and (page.number + 1) % step == 0:
-                progress = (page.number + 1) / len(doc) * 100
-                logger.debug(f"First {page.number+1} pages added to DB [{progress:.0f}%].")
+            if step != 0 and (int(chunk.id) + 1) % step == 0:
+                progress = (int(chunk.id) + 1) / len(doc) * 100
+                logger.debug(
+                    f"First {int(chunk.id)+1} semantic chunks added to DB [{progress:.0f}%].")
 
         logger.info(
-            "Insertion of the chunk summaries of the current document was successfully completed.")
+            "Insertion of the semantic chunks of the current document was successfully completed.")
 
-    def retrieve_summary(
+    def retrieve_chunk(
             self,
             query: str,
             top_k: int = 3
         ) -> Dict[str, List[str]]:
-        """Retrieves the most relevant chunk summaries from collection."""
-        output = {"summaries": [], "full_text": []}
+        """Retrieves the most relevant semantic chunks from collection."""
+        output = {"text": [], "chunk_number": []}
         try:
             results = self.collection.query(
                 query_texts=query,
@@ -730,9 +708,9 @@ class ChunkSummariesCollectionHandler(ChromaHandler):
             return output
 
         if results["documents"]:
-            output["summaries"] = results["documents"][0]
+            output["text"] = results["documents"][0]
         if results["metadatas"]:
-            output["full_text"] = [metadata["fullText"] for metadata in results["metadatas"][0]]
+            output["chunk_number"] = [metadata["chunk"] for metadata in results["metadatas"][0]]
 
         return output
 

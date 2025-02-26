@@ -21,6 +21,7 @@ file_management_parameters = {
         "x": Tuple[float, float],
         "y": Tuple[float, float]
     },
+    "TEXT_MARGIN_THICKNESS": Tuple[float, float, float, float],
     "source_path": str
 }
 

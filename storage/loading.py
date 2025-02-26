@@ -2,6 +2,7 @@ from pathlib import Path
 import shutil
 from typing import List, Optional, Set, Tuple, Union
 
+import fitz
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 
@@ -115,25 +116,38 @@ class Uploader:
             force: bool = OVERWRITE_IF_EXISTS,
             unique: bool = UNIQUE_IF_EXISTS
         ) -> Optional[Path]:
-        """Copies a PDF file from a specified local path to the source
-        project folder.
+        """Create a symbolic link for a PDF file from a local path to
+        the source folder.
 
         Parameters
         ----------
         file_path : str or Path
-            The path to the local file to be copied.
+            The path to the PDF file to be linked.
         force : bool, optional
             If True, overwrites the existing file. If False, skips if
-            the file exists. By default False.
+            the file exists. Defaults to the value of
+            `OVERWRITE_IF_EXISTS`.
         unique : bool, optional
             If True and `force=False`, adds an incremental number to the
             filename if a file with the same name exists. Otherwise, the
-            file is not copied into the project folder. By default False.
+            file is not linked into the project folder. By default False.
+
+        Returns
+        -------
+        Optional[Path]
+            The path to the created symbolic link, or None if the link
+            was not created due to conflicts.
 
         Raises
         ------
         ValueError
-            If the specified path is empty or does not point to a file.
+            If the specified path is not a file or is not a PDF.
+        FileNotFoundError
+            If the file does not exist.
+        PermissionError
+            If there are permission issues with the file or destination.
+        Exception
+            For any unexpected errors during symlink creation.
         """
         file_path = Path(file_path)
 
@@ -142,52 +156,43 @@ class Uploader:
                 "Specified path is empty or does not point to a file")
 
         if file_path.suffix.lower() != ".pdf":
-            logger.warning(
-                f"`{file_path.name}` file is not a PDF; it is skipped.")
+            logger.warning(f"`{file_path.name}` file is not a PDF; skipping.")
             return
 
         dest_path = self.source_folder_path / file_path.name
+
         # Handle file existence logic
-        if dest_path.exists():
+        if dest_path.exists() or dest_path.is_symlink():
             if force:
                 logger.warning(f"Overwriting `{dest_path.name}`.")
+                dest_path.unlink()  # Remove existing file/symlink
             elif unique:
                 _, dest_path = self._get_unique_file_path(dest_path)
                 logger.debug(
-                    f"Saving file as `{dest_path.name}` to avoid conflict."
-                )
+                    f"Saving file as `{dest_path.name}` to avoid conflict.")
             else:
                 logger.warning(
-                    f"File `{dest_path.name}` already exists; skipping copy.")
+                    f"File `{dest_path.name}` already exists; skipping link creation.")
                 return None
 
-        # Perform the file copy operation
+        # Create symbolic link instead of copying
         try:
-            with open(file_path, 'rb') as src, open(dest_path, 'wb') as dst:
-                shutil.copyfileobj(src, dst)
+            # with open(file_path, 'rb') as src, open(dest_path, 'wb') as dst:
+            #     shutil.copyfileobj(src, dst)
+            dest_path.hardlink_to(file_path)
+            logger.debug(f"Symbolic link created: `{dest_path}` → `{file_path}`")
         except FileNotFoundError as e:
             logger.error(f"File not found: `{file_path}`. Error: {e}")
             raise
         except PermissionError as e:
             logger.error(
-                f"Permission denied when accessing `{file_path}` or `{dest_path}`. Error: {e}", 
-            )
+                f"Permission denied for `{file_path}` or `{dest_path}`. Error: {e}")
             raise
         except Exception as e:
-            logger.error(
-                f"Unexpected error copying file `{file_path}` to `{dest_path}`: {e}", 
-            )
+            logger.error(f"Unexpected error creating symlink `{dest_path}`: {e}")
             raise
 
-        logger.debug(
-            f"File `{file_path.name}` was successfully saved as `{dest_path.name}`.",
-        )
-
-        info = DocInfo(
-            id=UUIDManager.uuid(self.unavailable_uuids),
-            title=dest_path.name,
-            embed_link=str(file_path)
-        )
+        info = self._get_metadata(dest_path)
         self.docs_info.append(info)
         return dest_path
 
@@ -273,3 +278,24 @@ class Uploader:
             dest_path = dest_folder.joinpath(file_name)
             counter += 1
         return file_name, dest_path
+
+    def _get_metadata(self, file_path: Union[str, Path]) -> DocInfo:
+        """Extract metadata from a PDF file and return it as a DocInfo object."""
+        file_path = Path(file_path).resolve(strict=True)
+        try:
+            with fitz.open(file_path) as doc:
+                metadata = doc.metadata
+        except (FileNotFoundError, fitz.FileDataError) as e:
+            logger.error(f"Error opening file `{file_path}`: {e}")
+            raise
+        metadata = metadata or {}
+
+        return DocInfo(
+            id=UUIDManager.uuid(self.unavailable_uuids),
+            file_name=file_path.name,
+            title=metadata.get("title", ""),
+            author=metadata.get("author", ""),
+            subject=metadata.get("subject", ""),
+            keywords=metadata.get("keywords", ""),
+            embed_link=metadata.get("file_path", str(file_path))
+        )

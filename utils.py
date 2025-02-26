@@ -73,3 +73,53 @@ def format_index_with_padding(
         raise ValueError("`raw_index` length exceeds desired length.")
 
     return f"{raw_index:0{desired_length}}"
+
+def convert_case(
+    input_str: str,
+    to_snake_case: bool = False,
+    to_camel_case: bool = False
+) -> str:
+    """Convert a string between `camelCase` and `snake_case` or to a `readable` format.
+
+    Parameters
+    ----------
+    input_str : str
+        The input string to be converted.
+    to_snake_case : bool, optional
+        If True, convert from camelCase to snake_case, by default False
+    to_camel_case : bool, optional
+        If True, convert from snake_case to camelCase, by default False
+
+    Returns
+    -------
+    str
+        The converted string.
+
+    Raises
+    ------
+    TypeError
+        If input_str is not a string.
+    ValueError
+        If both to_snake_case and to_camel_case are True.
+    """
+    if not isinstance(input_str, str):
+        raise TypeError("input_str must be a string")
+    if to_snake_case and to_camel_case:
+        raise ValueError("Only one of `to_snake_case` or `to_camel_case` can be True.")
+
+    pattern = r'(?<!^)(?=[A-Z])'
+    if to_snake_case:
+        # Convert camelCase to snake_case
+        # return re.sub(r'(?<!^)(?=[A-Z])', '_', input_str).lower()
+        return re.sub(pattern, '_', input_str).lower()
+    elif to_camel_case:
+        # Convert snake_case to camelCase
+        words = input_str.split('_')
+        return words[0].lower() + ''.join(word.capitalize() for word in words[1:])
+    
+    # Default: Convert to a readable string
+    if '_' in input_str:  # Handle snake_case
+        return ' '.join(word.capitalize() for word in input_str.split('_'))
+    else:  # Handle camelCase
+        readable = re.sub(r'(?<!^)(?=[A-Z])', ' ', input_str)
+        return readable.capitalize()

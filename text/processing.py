@@ -8,7 +8,7 @@ import contractions
 from huggingface_hub.utils.logging import disable_propagation
 import nltk
 from nltk.corpus import wordnet
-from nltk.tokenize import word_tokenize, TreebankWordDetokenizer
+from nltk.tokenize import sent_tokenize, word_tokenize, TreebankWordDetokenizer
 from nltk import pos_tag
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -131,7 +131,7 @@ class TextProcessor:
     """
 
     sentence_pat = re.compile(r'(?<=[.?!])\s+')
-    special_char_pat = re.compile(r'[^a-z0-9 ]')
+    special_char_pat = re.compile(r'[^a-z0-9. ]')
     extra_spaces_pat = re.compile(r'\s+')
     digits_pat = re.compile(r'\d+')
     url_pat = re.compile(r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+|www\.\S+', re.IGNORECASE)
@@ -536,38 +536,36 @@ class TextProcessor:
         if not text:
             return []
 
-        # Split input text into individual sentences when punctuation is
-        # followed by whitespace.
-        single_sentences = self.sentence_pat.split(text)
+        # Tokenize into sentences
+        single_sentences = sent_tokenize(text) # self.sentence_pat.split(text)
 
-        # Combine adjacent sentences to form a context window around
-        # each sentence.
+        # Combine adjacent sentences to improve contextual grouping
         combined_sentences = self._combine_sentences_with_context(single_sentences)
         
-        # Convert the combined sentences into vector representations.
-        embeddings = [self._text_to_vector(sent) for sent in combined_sentences]
+        # Compute vector embeddings in batch
+        embeddings = self._text_to_vector(combined_sentences)
         
-        # Calculate the cosine distances between consecutive combined
-        # sentence embeddings to measure similarity.
+        # Compute pairwise cosine distances
         distances = self._consecutive_cosine_distances(embeddings)
         
-        # Determine the threshold distance for breakpoint identification
-        # based on the `threshold` percentile (80th percentile) of all
-        # distances.
-        bkp_distance_thr = np.percentile(distances, threshold)
+        # Compute dynamic threshold (80th percentile)
+        threshold_distance = np.percentile(distances, threshold)
 
-        # Indices where the distance exceeds the calculated threshold
-        # (potential chunk breakpoint).
-        indices_above_thr = [
-            i for i, distance in enumerate(distances)
-            if distance > bkp_distance_thr
-        ]
-        # Loop through the identified breakpoints and create chunks.
-        chunks = []
-        for key, group in itertools.groupby(enumerate(single_sentences), 
-                                            lambda x: x[0] in indices_above_thr):
-            if not key:
-                chunks.append(' '.join(sentence for _, sentence in group))
+        # Find breakpoints where similarity drops below the threshold
+        indices_above_thr = np.argwhere(distances > threshold_distance).flatten()
+
+        # Group sentences into chunks
+        chunks, current_chunk = [], []
+        for i, sentence in enumerate(single_sentences):
+            current_chunk.append(sentence)
+            if i in indices_above_thr:  # Split at breakpoints
+                chunks.append(' '.join(current_chunk))
+                current_chunk = []
+
+        # Ensure last chunk is included
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+
         return chunks
 
     def process_page_text(self, page: Page) -> None:
@@ -622,57 +620,32 @@ class TextProcessor:
 
                 if par.processed_content:
                     par.embedding = self._text_to_vector(
-                        par.processed_content)
+                        par.processed_content)[0].tolist()
 
                 if step != 0 and (par_i + 1) % step == 0:
                     progress = (par_i + 1) / len(page) * 100
                     logger.debug(
                         f"{progress:.0f}% of the embeddings generation completed.")
 
-    def compute_embedding(self, file: Document) -> None:
-        """Compute the embeddings of the processed text chunks using the
-        `SentenceTransformer` model."""
-        logger.info(
-            f"Embedding generation for the document `{file.metadata.title}`.")
-
-        # Generate embeddings for the proocessed text using the
-        # SentenceTransformer model
-        for page in file.pages:
-            with timed_block(f"Embedding generation for page {page.number} took", logger):
-
-                step = int(len(page) * 0.22)  # Log about every 22% of completion
-                for chunk_i, chunk in enumerate(page.paragraphs):
-
-                    if step != 0 and (chunk_i + 1) % step == 0:
-                        progress = (chunk_i + 1) / len(page) * 100
-                        logger.debug(
-                            f"{progress:.0f}% of the embeddings generation completed.")
-
-                    if chunk.processed_content:
-                        chunk.embedding = self._text_to_vector(
-                            chunk.processed_content)
-
-        logger.info("Embeddings for the current document were elaborated.")
-
-    def document_chunking(self, file: Document) -> None:
+    def document_semnantic_chunking(self, file: Document) -> None:
         """Chunk the text content of a document into smaller text
         blocks. It then generates embedding of the determined chunks of
         text."""
         logger.debug(
-            f"Text chunking of the file `{file.metadata.title}` has begun.")
+            f"Text chunking of the file `{file.metadata.file_name}` has begun.")
 
         with timed_block(f"Document chunking took", logger):
-            full_text = "\n".join(page.full_text.raw_content for page in file.pages)
+            # full_text = "\n".join(page.full_text.raw_content for page in file.pages)
             file.chunks = [
                 TextBlock(id=str(i), content=chunk)
-                for i, chunk in enumerate(self.chunk_text(full_text))
+                for i, chunk in enumerate(self.chunk_text(file.full_text))
             ]
             logger.debug(f"Number of chunks created: {len(file.chunks)}")
 
             for chunk in file.chunks:
                 if chunk.raw_content:
                     chunk.embedding = self._text_to_vector(
-                        chunk.raw_content)
+                        chunk.raw_content)[0].tolist()
 
         logger.debug("The chunking of the current document has been completed.")
 
@@ -680,14 +653,14 @@ class TextProcessor:
         """Process a document by applying text processing and embedding
         generation to each page, followed by document chunking.
         """
-        logger.info(f"Processing of the `{file.metadata.title}` file started.")
+        logger.info(f"Processing of the `{file.metadata.file_name}` file started.")
 
         with timed_block(f"Document processing and embedding generation took", logger):
             for page in file.pages:
                 self.process_page_text(page)
                 self.compute_paragraph_embedding(page)
 
-        self.document_chunking(file)
+        self.document_semnantic_chunking(file)
 
         logger.info(
             "Processing of current document content successfully completed.")
@@ -812,6 +785,21 @@ class TextProcessor:
         self._check_nltk_dependencies(force_installation)
 
     def _check_nltk_dependencies(self, force_installation: bool) -> None:
+        """
+        Check and ensure the availability of required NLTK resources.
+
+        This method verifies the presence of the WordNet corpus, Punkt
+        tokenizer, and averaged perceptron tagger. If any of these
+        resources are missing, it attempts to download them if
+        `force_installation` is True. Otherwise, it logs a warning and
+        sets `synonym_replacement_available` to False.
+
+        Parameters
+        ----------
+        force_installation : bool
+            If True, missing NLTK resources will be automatically
+            downloaded.
+        """
         # Check if wordnet is available
         self.synonym_replacement_available = True
         try:
@@ -902,71 +890,62 @@ class TextProcessor:
                 text = self.IN_DEPTH_PROCEDURES[name](text)
         return text
 
-    def _text_to_vector(self, text: str) -> List[float]:
-        """Convert input text into a vector representation using the
-        SentenceTransformer model."""
-        if not text:
-            return np.zeros(self.embedding_size).tolist()
+    def _text_to_vector(self, texts: Union[str, List[str]]) -> np.ndarray:
+        """Convert input text (single string or list of sentences) into vector embeddings.
+
+        Parameters
+        ----------
+        texts : str or List[str]
+            Single sentence or list of sentences to be converted into
+            embeddings.
+
+        Returns
+        -------
+        np.ndarray
+            A 2D NumPy array where each row represents an embedding vector.
+        """
+        if isinstance(texts, str):  # Convert single string into a list
+            texts = [texts]
+
+        if not texts:
+            return np.zeros((1, self.embedding_size))
 
         try:
             return self.embedder_model.encode(
-                sentences=text,
-                convert_to_tensor=True,
+                sentences=texts,
+                convert_to_tensor=False,
                 show_progress_bar=False
-            ).tolist()
+            )
         except RuntimeError as e:
-            logger.warning(
-                f"Runtime error in the generation of the embedding: {e}")
-            return np.zeros(self.embedding_size).tolist()
+            logger.warning(f"Runtime error in embedding generation: {e}")
+            return np.zeros((len(texts), self.embedding_size))
 
     def _combine_sentences_with_context(self, sentences: List[str]) -> List[str]:
         """Combine each sentence with its preceding and following
         sentences to provide additional context.
-
-        Parameters
-        ----------
-        sentences : List[str]
-            A list of sentences to be combined with context.
-
-        Returns
-        -------
-        List[str]
-            A list of sentences where each sentence is combined with its
-            previous and next sentence, except for the first and last
-            sentences which are combined with only one adjacent sentence.
         """
         if not sentences:
             return []
 
+        # If Python <3.10, use a manual alternative for pairwise
+        prev_sents = [''] + sentences[:-1]  # Shift left (add empty for first)
+        next_sents = sentences[1:] + ['']   # Shift right (add empty for last)
+
         return [
-            (sentences[i-1] + ' ' if i > 0 else '') +
-            sentences[i] +
-            (' ' + sentences[i+1] if i < len(sentences) - 1 else '')
-            for i in range(len(sentences))
+            f"{prev} {sent} {nxt}".strip()
+            for prev, sent, nxt in zip(prev_sents, sentences, next_sents)
         ]
 
     def _consecutive_cosine_distances(
             self,
             embeddings: Union[np.ndarray, List[List[float]]]
-        ) -> List[float]:
-        """Calculate the cosine distances, defined as 1 minus the cosine
+        ) -> np.ndarray:
+        """Compute cosine distances, defined as 1 minus the cosine
         similarity, between each pair of consecutive embeddings.
-
-        Parameters
-        ----------
-        embeddings : Union[np.ndarray, List[List[float]]]
-            A collection of embeddings for which consecutive cosine
-            distances are to be calculated.
-
-        Returns
-        -------
-        List[float]
-            A list of cosine distances between each pair of consecutive
-            embeddings. Returns an empty list if no embeddings are provided.
         """
-        if not embeddings:
-            return []
+        embeddings = np.asarray(embeddings)  # Ensure it's a NumPy array
 
-        embeddings = np.array(embeddings)
-        distances = 1 - np.diag(cosine_similarity(embeddings[:-1], embeddings[1:]))
-        return distances.tolist()
+        if embeddings.size == 0 or len(embeddings) < 2:
+            return np.array([])  # Return empty NumPy array
+
+        return 1 - cosine_similarity(embeddings[:-1], embeddings[1:]).diagonal()
